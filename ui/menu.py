@@ -151,24 +151,45 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
     
     # Get user selection
     console.print("[cyan]Hedef cihazları seçin (Space: işaretle, Enter: devam):[/cyan]")
-    selected = questionary.checkbox(
-        "",
-        choices=choices,
-        style=questionary.Style([
-            ('selected', 'fg:cyan bold'),
-            ('pointer', 'fg:cyan bold'),
-            ('highlighted', 'fg:cyan'),
-        ])
-    ).ask()
+    console.print("[dim]💡 Ok tuşları ile gezin, Space ile işaretleyin, Enter ile onaylayın[/dim]")
     
-    if not selected:
+    try:
+        selected = questionary.checkbox(
+            "",
+            choices=choices,
+            style=questionary.Style([
+                ('selected', 'fg:cyan bold'),
+                ('pointer', 'fg:cyan bold'),
+                ('highlighted', 'fg:cyan'),
+            ])
+        ).ask()
+        
+        # DEBUG
+        console.print(f"[dim]🔍 DEBUG: Questionary sonucu: {selected}[/dim]")
+        
+        if selected is None:
+            console.print("[yellow]⚠️  Seçim iptal edildi (Ctrl+C veya ESC)[/yellow]")
+            return [], False
+        
+        if not selected:
+            console.print("[yellow]⚠️  Hiç cihaz seçilmedi[/yellow]")
+            return [], False
+        
+        # Check if "Select All" was chosen
+        if "⚡ HEPSINE SALDIRI YAP" in selected:
+            all_macs = [c for c in choices if c != "⚡ HEPSINE SALDIRI YAP"]
+            console.print(f"[green]✓ Tüm cihazlar seçildi: {len(all_macs)} hedef[/green]")
+            return all_macs, True
+        
+        console.print(f"[green]✓ {len(selected)} cihaz seçildi[/green]")
+        return selected, False
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️  Seçim iptal edildi[/yellow]")
         return [], False
-    
-    # Check if "Select All" was chosen
-    if "⚡ HEPSINE SALDIRI YAP" in selected:
-        return [c for c in choices if c != "⚡ HEPSINE SALDIRI YAP"], True
-    
-    return selected, False
+    except Exception as e:
+        console.print(f"[red]✗ Seçim hatası: {e}[/red]")
+        return [], False
 
 
 def confirm_attack(target_count: int, ap_name: str) -> bool:
@@ -177,10 +198,26 @@ def confirm_attack(target_count: int, ap_name: str) -> bool:
     console.print(f"[yellow]⚠️  {target_count} cihaza '{ap_name}' ağında saldırı başlatılacak![/yellow]")
     console.print()
     
-    return questionary.confirm(
-        "Devam etmek istiyor musunuz?",
-        default=False
-    ).ask()
+    try:
+        result = questionary.confirm(
+            "Devam etmek istiyor musunuz?",
+            default=False
+        ).ask()
+        
+        console.print(f"[dim]🔍 DEBUG: confirm_attack sonucu: {result}[/dim]")
+        
+        if result is None:
+            console.print("[yellow]⚠️  Onay iptal edildi[/yellow]")
+            return False
+        
+        return result
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️  Onay iptal edildi[/yellow]")
+        return False
+    except Exception as e:
+        console.print(f"[red]✗ Onay hatası: {e}[/red]")
+        return False
 
 
 def show_help():

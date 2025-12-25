@@ -205,16 +205,29 @@ class KYKSKN:
         # Get clients for this AP
         clients = self.network_scanner.get_clients_for_ap(ap.bssid)
         
+        console.print(f"[dim]🔍 DEBUG: AP BSSID: {ap.bssid}[/dim]")
+        console.print(f"[dim]🔍 DEBUG: Bulunan client sayısı: {len(clients)}[/dim]")
+        
         if not clients:
             show_error("Bu ağda bağlı cihaz bulunamadı!")
             show_warning("Cihazlar bağlandıkça tekrar tarama yapabilirsiniz.")
+            console.print(f"[yellow]💡 İpucu: Ağda aktif cihaz olduğundan emin olun[/yellow]")
+            console.print(f"[yellow]💡 Daha uzun tarama süresi deneyin[/yellow]")
             return None
+        
+        # DEBUG: Show all clients
+        console.print(f"[dim]🔍 DEBUG: Client MAC'ler:[/dim]")
+        for client in clients:
+            console.print(f"[dim]  • {client.mac} -> {client.bssid} ({client.power} dBm)[/dim]")
         
         # Get user's MAC (try to detect)
         user_mac = self.wireless_manager.original_mac
+        console.print(f"[dim]🔍 DEBUG: Kullanıcı MAC: {user_mac}[/dim]")
         
         # Show client selection
         selected_macs, select_all = select_clients(clients, user_mac)
+        
+        console.print(f"[dim]🔍 DEBUG: Seçilen MAC sayısı: {len(selected_macs) if selected_macs else 0}[/dim]")
         
         if not selected_macs:
             show_warning("Hiç hedef seçilmedi")
@@ -227,9 +240,20 @@ class KYKSKN:
     
     def execute_attack(self, ap, target_macs):
         """Execute deauth attack"""
+        console.print(f"[dim]🔍 DEBUG: execute_attack çağrıldı[/dim]")
+        console.print(f"[dim]🔍 DEBUG: AP: {ap.essid} ({ap.bssid})[/dim]")
+        console.print(f"[dim]🔍 DEBUG: Hedef sayısı: {len(target_macs)}[/dim]")
+        
         # Confirm attack
-        if not confirm_attack(len(target_macs), ap.essid):
-            show_warning("Saldırı iptal edildi")
+        try:
+            confirmed = confirm_attack(len(target_macs), ap.essid)
+            console.print(f"[dim]🔍 DEBUG: Onay sonucu: {confirmed}[/dim]")
+            
+            if not confirmed:
+                show_warning("Saldırı iptal edildi")
+                return
+        except Exception as e:
+            console.print(f"[red]✗ Onay hatası: {e}[/red]")
             return
         
         console.print()

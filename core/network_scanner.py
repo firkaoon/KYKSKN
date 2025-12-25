@@ -275,14 +275,22 @@ class NetworkScanner:
             parts = [p.strip() for p in line.split(',')]
             
             if len(parts) < 6:
+                logger.debug(f"Client line too short: {len(parts)} parts (need 6)")
                 return
             
             client_mac = parts[0].strip()
             if not client_mac or not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                logger.debug(f"Invalid client MAC format: {client_mac}")
                 return
             
             bssid = parts[5].strip()
             if not bssid or bssid == '(not associated)':
+                logger.debug(f"Client not associated: {client_mac}")
+                return
+            
+            # Validate BSSID format
+            if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                logger.debug(f"Invalid BSSID format for client: {bssid}")
                 return
             
             power_str = parts[3].strip()
@@ -297,6 +305,9 @@ class NetworkScanner:
             except:
                 packets = 0
             
+            # DEBUG: Log what we're parsing
+            logger.debug(f"Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}, Packets={packets}")
+            
             client = Client(
                 mac=client_mac.upper(),
                 bssid=bssid.upper(),
@@ -305,14 +316,19 @@ class NetworkScanner:
             )
             
             self.clients[client_mac.upper()] = client
+            logger.debug(f"✓ Client added: {client_mac} -> {bssid}")
             
             # Add client to AP's client list
             if bssid.upper() in self.access_points:
                 if client_mac.upper() not in self.access_points[bssid.upper()].clients:
                     self.access_points[bssid.upper()].clients.append(client_mac.upper())
+                    logger.debug(f"✓ Client linked to AP: {client_mac} -> {bssid}")
+            else:
+                logger.debug(f"⚠️  AP not found for client: {bssid}")
                     
         except Exception as e:
             logger.debug(f"Error parsing client line: {e}")
+            logger.debug(f"Line content: {line[:100]}")
     
     def get_sorted_aps(self) -> List[AccessPoint]:
         """Get access points sorted by signal strength"""
@@ -330,9 +346,18 @@ class NetworkScanner:
     def get_clients_for_ap(self, bssid: str) -> List[Client]:
         """Get all clients for a specific AP"""
         clients = []
+        bssid_upper = bssid.upper()
+        
+        logger.debug(f"Getting clients for AP: {bssid_upper}")
+        logger.debug(f"Total clients in database: {len(self.clients)}")
+        
         for client in self.clients.values():
-            if client.bssid.upper() == bssid.upper():
+            logger.debug(f"Checking client: {client.mac} -> {client.bssid} (looking for {bssid_upper})")
+            if client.bssid.upper() == bssid_upper:
                 clients.append(client)
+                logger.debug(f"✓ Client matched: {client.mac}")
+        
+        logger.debug(f"Found {len(clients)} clients for {bssid_upper}")
         return clients
     
     def get_ap_by_bssid(self, bssid: str) -> Optional[AccessPoint]:
