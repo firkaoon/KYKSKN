@@ -98,14 +98,16 @@ class WirelessManager:
         time.sleep(1)
     
     def enable_monitor_mode(self, interface: str) -> Optional[str]:
-        """Enable monitor mode on interface"""
+        """Enable monitor mode on interface - DİNAMİK TESPİT"""
         try:
             logger.info(f"Enabling monitor mode on {interface}")
+            console.print(f"[dim]🔍 DEBUG: Orijinal interface: {interface}[/dim]")
             
             # Check if already in monitor mode
             if is_monitor_mode(interface):
                 self.monitor_interface = interface
                 logger.info(f"{interface} already in monitor mode")
+                console.print(f"[green]✓ {interface} zaten monitor mode'da[/green]")
                 return interface
             
             # Save original interface
@@ -124,33 +126,65 @@ class WirelessManager:
             result = run_command(['airmon-ng', 'start', interface], timeout=10)
             
             if result and result.returncode == 0:
-                # Find monitor interface name
+                # Find monitor interface name - DİNAMİK TESPİT
                 time.sleep(2)
                 
                 # Try common monitor interface names
                 possible_names = [
-                    f"{interface}mon",
-                    f"{interface}mon0",
-                    "mon0",
-                    "wlan0mon",
-                    "wlan1mon"
+                    f"{interface}mon",      # wlan0mon
+                    f"{interface}mon0",     # wlan0mon0
+                    "mon0",                 # mon0
+                    "wlan0mon",             # wlan0mon
+                    "wlan1mon",             # wlan1mon
+                    "wlan2mon",             # wlan2mon
                 ]
                 
-                for mon_iface in possible_names:
-                    if check_interface_exists(mon_iface) and is_monitor_mode(mon_iface):
-                        self.monitor_interface = mon_iface
-                        self.bring_interface_up(mon_iface)
-                        logger.info(f"Monitor mode enabled: {mon_iface}")
-                        console.print(f"[green]✓ Monitor mode aktif: {mon_iface}[/green]")
-                        return mon_iface
+                console.print(f"[dim]🔍 DEBUG: Olası monitor interface isimleri: {possible_names}[/dim]")
                 
-                # If not found, check all interfaces
-                for iface in self.get_wireless_interfaces():
+                for mon_iface in possible_names:
+                    console.print(f"[dim]🔍 DEBUG: Kontrol ediliyor: {mon_iface}[/dim]")
+                    if check_interface_exists(mon_iface):
+                        console.print(f"[dim]✓ {mon_iface} mevcut[/dim]")
+                        if is_monitor_mode(mon_iface):
+                            self.monitor_interface = mon_iface
+                            self.bring_interface_up(mon_iface)
+                            logger.info(f"Monitor mode enabled: {mon_iface}")
+                            console.print(f"[green]✓ Monitor mode aktif: {mon_iface}[/green]")
+                            return mon_iface
+                
+                # If not found, check ALL wireless interfaces
+                console.print(f"[dim]🔍 DEBUG: Tüm wireless interface'ler kontrol ediliyor...[/dim]")
+                all_interfaces = self.get_wireless_interfaces()
+                console.print(f"[dim]🔍 DEBUG: Bulunan interface'ler: {all_interfaces}[/dim]")
+                
+                for iface in all_interfaces:
+                    console.print(f"[dim]🔍 DEBUG: {iface} monitor mode kontrolü...[/dim]")
                     if is_monitor_mode(iface):
                         self.monitor_interface = iface
+                        self.bring_interface_up(iface)
                         logger.info(f"Monitor mode enabled: {iface}")
                         console.print(f"[green]✓ Monitor mode aktif: {iface}[/green]")
                         return iface
+                
+                # Last resort: Parse airmon-ng output
+                console.print(f"[dim]🔍 DEBUG: airmon-ng çıktısı parse ediliyor...[/dim]")
+                if result.stdout:
+                    console.print(f"[dim]airmon-ng output:\n{result.stdout}[/dim]")
+                    # Look for "monitor mode vif enabled" line
+                    for line in result.stdout.split('\n'):
+                        if 'monitor mode' in line.lower() and 'enabled' in line.lower():
+                            # Extract interface name
+                            import re
+                            match = re.search(r'\[(\w+)\]', line)
+                            if match:
+                                mon_iface = match.group(1)
+                                console.print(f"[dim]🔍 DEBUG: Çıktıdan tespit edildi: {mon_iface}[/dim]")
+                                if check_interface_exists(mon_iface):
+                                    self.monitor_interface = mon_iface
+                                    self.bring_interface_up(mon_iface)
+                                    logger.info(f"Monitor mode enabled: {mon_iface}")
+                                    console.print(f"[green]✓ Monitor mode aktif: {mon_iface}[/green]")
+                                    return mon_iface
             
             logger.error("Failed to enable monitor mode")
             return None

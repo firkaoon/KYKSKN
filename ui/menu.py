@@ -102,7 +102,7 @@ def select_network(aps: List[AccessPoint], current_network: Optional[str] = None
 
 
 def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tuple[List[str], bool]:
-    """Show client selection menu with checkboxes"""
+    """Show client selection menu with checkboxes - WHITELIST SYSTEM"""
     if not clients:
         console.print("[red]✗ Bağlı cihaz bulunamadı![/red]")
         return [], False
@@ -112,15 +112,18 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
     table.add_column("MAC Adresi", style="white", width=20)
     table.add_column("Sinyal", style="green", width=15)
     table.add_column("Paket", style="yellow", width=10)
-    table.add_column("Durum", style="magenta", width=20)
+    table.add_column("Durum", style="magenta", width=25)
     
-    # Add rows
+    # Add rows - TÜM CİHAZLAR choices'a eklenir
     choices = []
+    all_client_macs = []
+    
     for client in clients:
         is_user = user_mac and client.mac.upper() == user_mac.upper()
+        all_client_macs.append(client.mac)
         
         if is_user:
-            status = "🖥️  Senin Cihazın"
+            status = "🖥️  Senin Cihazın (Otomatik Korunur)"
             style = "bold green"
             table.add_row(
                 client.mac,
@@ -129,8 +132,9 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
                 status,
                 style=style
             )
+            # Kullanıcının cihazı choices'a EKLENMİYOR (otomatik korunur)
         else:
-            status = "📱 Hedef"
+            status = "📱 Potansiyel Hedef"
             table.add_row(
                 client.mac,
                 f"{client.power} dBm",
@@ -141,17 +145,22 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
     
     console.print(table)
     console.print()
+    console.print("[bold yellow]⚠️  WHITELIST SİSTEMİ:[/bold yellow]")
+    console.print("[yellow]• Seçtiğiniz cihazlar KORUNACAK (saldırı yapılmayacak)[/yellow]")
+    console.print("[yellow]• Seçmediğiniz cihazlara SALDIRI yapılacak[/yellow]")
+    console.print("[yellow]• 'Hepsine Saldır' = Hiç kimseyi koruma[/yellow]")
+    console.print()
     
     if not choices:
         console.print("[yellow]⚠️  Hedef alınabilecek cihaz yok (sadece senin cihazın var)[/yellow]")
         return [], False
     
-    # Add "Select All" option
-    choices.append("⚡ HEPSINE SALDIRI YAP")
+    # Add "Attack All" option
+    choices.append("⚡ HEPSİNE SALDIRI YAP (Hiç kimseyi koruma)")
     
     # Get user selection
-    console.print("[cyan]Hedef cihazları seçin (Space: işaretle, Enter: devam):[/cyan]")
-    console.print("[dim]💡 Ok tuşları ile gezin, Space ile işaretleyin, Enter ile onaylayın[/dim]")
+    console.print("[cyan]KORUNACAK cihazları seçin (Space: işaretle, Enter: devam):[/cyan]")
+    console.print("[dim]💡 Seçtikleriniz KORUNACAK, seçmediklerinize SALDIRI yapılacak![/dim]")
     
     try:
         selected = questionary.checkbox(
@@ -165,24 +174,31 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
         ).ask()
         
         # DEBUG
-        console.print(f"[dim]🔍 DEBUG: Questionary sonucu: {selected}[/dim]")
+        console.print(f"[dim]🔍 DEBUG: Seçilen (korunacak): {selected}[/dim]")
         
         if selected is None:
             console.print("[yellow]⚠️  Seçim iptal edildi (Ctrl+C veya ESC)[/yellow]")
             return [], False
         
-        if not selected:
-            console.print("[yellow]⚠️  Hiç cihaz seçilmedi[/yellow]")
+        # Check if "Attack All" was chosen
+        if "⚡ HEPSİNE SALDIRI YAP (Hiç kimseyi koruma)" in selected:
+            # Hiç kimse korunmayacak, herkese saldırı
+            attack_targets = [c for c in choices if c != "⚡ HEPSİNE SALDIRI YAP (Hiç kimseyi koruma)"]
+            console.print(f"[bold red]⚡ TÜM CİHAZLARA SALDIRI: {len(attack_targets)} hedef[/bold red]")
+            return attack_targets, True
+        
+        # WHITELIST LOJİĞİ: Seçilenler korunacak, seçilmeyenler hedef alınacak
+        protected = set(selected)  # Korunacaklar
+        attack_targets = [mac for mac in choices if mac not in protected and mac != "⚡ HEPSİNE SALDIRI YAP (Hiç kimseyi koruma)"]
+        
+        console.print(f"[green]✓ {len(protected)} cihaz KORUNACAK[/green]")
+        console.print(f"[red]⚡ {len(attack_targets)} cihaza SALDIRI yapılacak[/red]")
+        
+        if not attack_targets:
+            console.print("[yellow]⚠️  Tüm cihazlar korunuyor, saldırı hedefi yok![/yellow]")
             return [], False
         
-        # Check if "Select All" was chosen
-        if "⚡ HEPSINE SALDIRI YAP" in selected:
-            all_macs = [c for c in choices if c != "⚡ HEPSINE SALDIRI YAP"]
-            console.print(f"[green]✓ Tüm cihazlar seçildi: {len(all_macs)} hedef[/green]")
-            return all_macs, True
-        
-        console.print(f"[green]✓ {len(selected)} cihaz seçildi[/green]")
-        return selected, False
+        return attack_targets, False
         
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠️  Seçim iptal edildi[/yellow]")

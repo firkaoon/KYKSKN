@@ -243,6 +243,7 @@ class KYKSKN:
         console.print(f"[dim]🔍 DEBUG: execute_attack çağrıldı[/dim]")
         console.print(f"[dim]🔍 DEBUG: AP: {ap.essid} ({ap.bssid})[/dim]")
         console.print(f"[dim]🔍 DEBUG: Hedef sayısı: {len(target_macs)}[/dim]")
+        console.print(f"[dim]🔍 DEBUG: Monitor interface: {self.monitor_interface}[/dim]")
         
         # Confirm attack
         try:
