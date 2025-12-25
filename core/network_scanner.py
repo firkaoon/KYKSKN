@@ -285,7 +285,8 @@ class NetworkScanner:
             encryption = parts[5].strip() if len(parts) > 5 else "Unknown"
             
             # DEBUG: Log what we're parsing
-            logger.debug(f"Parsing AP: BSSID={bssid}, ESSID={essid}, Channel={channel}, Power={power}")
+            console.print(f"[dim]🔍 Parsing AP: BSSID={bssid}, ESSID={essid}, Channel={channel}, Power={power}[/dim]")
+            logger.info(f"Parsing AP: BSSID={bssid}, ESSID={essid}")
             
             if essid and bssid:
                 ap = AccessPoint(
@@ -298,9 +299,11 @@ class NetworkScanner:
                     clients=[]
                 )
                 self.access_points[bssid.upper()] = ap
-                logger.debug(f"✓ AP added: {essid} ({bssid})")
+                console.print(f"[green]✓ AP added: {essid} ({bssid.upper()})[/green]")
+                logger.info(f"✓ AP added: {essid} ({bssid})")
             else:
-                logger.debug(f"AP skipped: ESSID={essid}, BSSID={bssid}")
+                console.print(f"[yellow]⚠️  AP skipped: ESSID={essid}, BSSID={bssid}[/yellow]")
+                logger.info(f"AP skipped: ESSID={essid}, BSSID={bssid}")
                 
         except Exception as e:
             logger.debug(f"Error parsing AP line: {e}")
@@ -317,16 +320,19 @@ class NetworkScanner:
             
             client_mac = parts[0].strip()
             if not client_mac or not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                console.print(f"[dim]⚠️  Invalid client MAC format: {client_mac}[/dim]")
                 logger.debug(f"Invalid client MAC format: {client_mac}")
                 return
             
             bssid = parts[5].strip()
             if not bssid or bssid == '(not associated)':
+                console.print(f"[dim]⚠️  Client not associated: {client_mac}[/dim]")
                 logger.debug(f"Client not associated: {client_mac}")
                 return
             
             # Validate BSSID format
             if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                console.print(f"[red]⚠️  Invalid BSSID format for client {client_mac}: '{bssid}'[/red]")
                 logger.debug(f"Invalid BSSID format for client: {bssid}")
                 return
             
@@ -343,7 +349,8 @@ class NetworkScanner:
                 packets = 0
             
             # DEBUG: Log what we're parsing
-            logger.debug(f"Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}, Packets={packets}")
+            console.print(f"[dim]🔍 Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}, Packets={packets}[/dim]")
+            logger.info(f"Parsing Client: MAC={client_mac}, BSSID={bssid}")
             
             client = Client(
                 mac=client_mac.upper(),
@@ -353,15 +360,19 @@ class NetworkScanner:
             )
             
             self.clients[client_mac.upper()] = client
-            logger.debug(f"✓ Client added: {client_mac} -> {bssid}")
+            console.print(f"[green]✓ Client added to database: {client_mac} -> {bssid}[/green]")
+            logger.info(f"✓ Client added: {client_mac} -> {bssid}")
             
             # Add client to AP's client list
             if bssid.upper() in self.access_points:
                 if client_mac.upper() not in self.access_points[bssid.upper()].clients:
                     self.access_points[bssid.upper()].clients.append(client_mac.upper())
-                    logger.debug(f"✓ Client linked to AP: {client_mac} -> {bssid}")
+                    console.print(f"[green]✓✓ Client linked to AP: {client_mac} -> {bssid}[/green]")
+                    logger.info(f"✓ Client linked to AP: {client_mac} -> {bssid}")
             else:
-                logger.debug(f"⚠️  AP not found for client: {bssid}")
+                console.print(f"[red]⚠️  AP NOT FOUND for client {client_mac}! Looking for BSSID: {bssid}[/red]")
+                console.print(f"[yellow]Available APs: {list(self.access_points.keys())}[/yellow]")
+                logger.warning(f"⚠️  AP not found for client: {bssid}")
                     
         except Exception as e:
             logger.debug(f"Error parsing client line: {e}")
@@ -385,16 +396,24 @@ class NetworkScanner:
         clients = []
         bssid_upper = bssid.upper()
         
-        logger.debug(f"Getting clients for AP: {bssid_upper}")
-        logger.debug(f"Total clients in database: {len(self.clients)}")
+        console.print(f"[cyan]🔍 Getting clients for AP: {bssid_upper}[/cyan]")
+        console.print(f"[cyan]🔍 Total clients in database: {len(self.clients)}[/cyan]")
+        logger.info(f"Getting clients for AP: {bssid_upper}")
+        logger.info(f"Total clients in database: {len(self.clients)}")
         
         for client in self.clients.values():
-            logger.debug(f"Checking client: {client.mac} -> {client.bssid} (looking for {bssid_upper})")
+            console.print(f"[dim]  Checking: {client.mac} -> {client.bssid} (looking for {bssid_upper})[/dim]")
+            logger.info(f"Checking client: {client.mac} -> {client.bssid} (looking for {bssid_upper})")
+            
             if client.bssid.upper() == bssid_upper:
                 clients.append(client)
-                logger.debug(f"✓ Client matched: {client.mac}")
+                console.print(f"[green]  ✓ MATCH! Client {client.mac} belongs to this AP[/green]")
+                logger.info(f"✓ Client matched: {client.mac}")
+            else:
+                console.print(f"[yellow]  ✗ No match: {client.bssid} != {bssid_upper}[/yellow]")
         
-        logger.debug(f"Found {len(clients)} clients for {bssid_upper}")
+        console.print(f"[bold cyan]📊 Found {len(clients)} clients for {bssid_upper}[/bold cyan]")
+        logger.info(f"Found {len(clients)} clients for {bssid_upper}")
         return clients
     
     def get_ap_by_bssid(self, bssid: str) -> Optional[AccessPoint]:
