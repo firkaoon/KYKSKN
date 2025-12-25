@@ -43,14 +43,18 @@ def check_and_install_dependencies():
         console.print("[yellow]⚙️  Kütüphaneler yükleniyor...[/yellow]")
         
         try:
+            # Try with --break-system-packages for Kali Linux
             subprocess.check_call([
-                sys.executable, '-m', 'pip', 'install', '--quiet', *missing_packages
-            ])
+                sys.executable, '-m', 'pip', 'install', '--quiet', '--break-system-packages', *missing_packages
+            ], stderr=subprocess.DEVNULL)
             console.print("[green]✓ Tüm kütüphaneler başarıyla yüklendi![/green]")
             time.sleep(1)
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]✗ Kütüphane yükleme hatası: {e}[/red]")
-            console.print("[yellow]Manuel yükleme için: pip3 install -r requirements.txt[/yellow]")
+        except subprocess.CalledProcessError:
+            console.print(f"[red]✗ Otomatik yükleme başarısız[/red]")
+            console.print("[yellow]Manuel yükleme için:[/yellow]")
+            console.print(f"[cyan]  sudo pip3 install --break-system-packages -r requirements.txt[/cyan]")
+            console.print("[yellow]veya:[/yellow]")
+            console.print(f"[cyan]  sudo ./install.sh[/cyan]")
             sys.exit(1)
 
 # Install dependencies first

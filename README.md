@@ -88,12 +88,14 @@ cd KYKSKN
 sudo apt update
 sudo apt install aircrack-ng python3 python3-pip
 
-# Python kütüphanelerini yükleyin
-pip3 install -r requirements.txt
+# Python kütüphanelerini yükleyin (Kali Linux için)
+sudo pip3 install --break-system-packages -r requirements.txt
 
 # Çalıştırılabilir yapın
 chmod +x main.py
 ```
+
+> **Not**: Kali Linux'ta `externally-managed-environment` hatası alırsanız, [KALI_LINUX_FIX.md](KALI_LINUX_FIX.md) dosyasına bakın.
 
 ---
 

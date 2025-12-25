@@ -67,13 +67,25 @@ echo ""
 
 # Install Python dependencies
 echo "🐍 Python kütüphaneleri kuruluyor..."
-pip3 install -q -r requirements.txt
+
+# Try with --break-system-packages for Kali Linux
+pip3 install -q --break-system-packages -r requirements.txt 2>/dev/null
 
 if [ $? -eq 0 ]; then
     echo "✓ Python kütüphaneleri kuruldu"
 else
-    echo "❌ Python kütüphaneleri kurulumunda hata oluştu"
-    exit 1
+    # If that fails, try system packages
+    echo "  ⚙️  Sistem paketlerinden kuruluyor..."
+    apt install -y python3-scapy python3-rich python3-netifaces python3-psutil > /dev/null 2>&1
+    pip3 install -q --break-system-packages questionary pyfiglet colorama 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+        echo "✓ Python kütüphaneleri kuruldu"
+    else
+        echo "❌ Python kütüphaneleri kurulumunda hata oluştu"
+        echo "ℹ️  Manuel kurulum: pip3 install --break-system-packages -r requirements.txt"
+        exit 1
+    fi
 fi
 
 echo ""
