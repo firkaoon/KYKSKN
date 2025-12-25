@@ -202,7 +202,20 @@ class KYKSKN:
         """Select target clients"""
         show_section_header("Hedef Cihaz Seçimi", f"Ağ: {ap.essid}")
         
-        # Get clients for this AP
+        # ÖNEMLİ: Ağ seçildikten sonra O AĞA ÖZEL 30 SANİYELİK DERİN TARAMA!
+        console.print(f"[yellow]⚠️  Seçilen ağa özel derin tarama yapılacak...[/yellow]")
+        console.print(f"[cyan]📡 Bu tarama ağdaki TÜM cihazları bulacak![/cyan]\n")
+        
+        time.sleep(1)
+        
+        # Derin tarama başlat
+        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=30)
+        
+        if not deep_scan_success:
+            show_error("Derin tarama başarısız!")
+            return None
+        
+        # Get clients for this AP (derin taramadan sonra)
         clients = self.network_scanner.get_clients_for_ap(ap.bssid)
         
         console.print(f"[dim]🔍 DEBUG: AP BSSID: {ap.bssid}[/dim]")
@@ -212,7 +225,7 @@ class KYKSKN:
             show_error("Bu ağda bağlı cihaz bulunamadı!")
             show_warning("Cihazlar bağlandıkça tekrar tarama yapabilirsiniz.")
             console.print(f"[yellow]💡 İpucu: Ağda aktif cihaz olduğundan emin olun[/yellow]")
-            console.print(f"[yellow]💡 Daha uzun tarama süresi deneyin[/yellow]")
+            console.print(f"[yellow]💡 30 saniyelik tarama bile cihaz bulamadı - ağda aktif cihaz yok olabilir[/yellow]")
             return None
         
         # DEBUG: Show all clients

@@ -416,6 +416,123 @@ class NetworkScanner:
         logger.info(f"Found {len(clients)} clients for {bssid_upper}")
         return clients
     
+    def deep_scan_ap(self, bssid: str, channel: int, duration: int = 30) -> bool:
+        """
+        Seçilen ağa özel derin tarama - TÜM cihazları bulmak için!
+        
+        Args:
+            bssid: Hedef AP'nin BSSID'si
+            channel: AP'nin kanalı
+            duration: Tarama süresi (saniye)
+        
+        Returns:
+            bool: Başarılı ise True
+        """
+        try:
+            console.print(f"\n[bold yellow]🔍 DERİN TARAMA BAŞLATILIYOR...[/bold yellow]")
+            console.print(f"[cyan]📡 Hedef: {bssid}[/cyan]")
+            console.print(f"[cyan]📻 Kanal: {channel}[/cyan]")
+            console.print(f"[cyan]⏱️  Süre: {duration} saniye[/cyan]")
+            console.print(f"[dim]💡 Bu tarama seçilen ağdaki TÜM cihazları bulacak...[/dim]\n")
+            
+            # Clean up old scan files
+            cleanup_temp_files(f"{TEMP_DIR}/deepscan-*")
+            
+            output_file = f"{TEMP_DIR}/deepscan"
+            
+            # Build command - SADECE BU KANALI TARA!
+            cmd = [
+                'airodump-ng',
+                '--bssid', bssid.upper(),  # SADECE BU AP!
+                '--channel', str(channel),  # SADECE BU KANAL!
+                '--output-format', 'csv',
+                '-w', output_file,
+                '--write-interval', '1',
+                self.interface
+            ]
+            
+            logger.info(f"Deep scan command: {' '.join(cmd)}")
+            console.print(f"[dim]🔍 Komut: {' '.join(cmd)}[/dim]\n")
+            
+            # Start airodump-ng
+            self.scan_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            
+            # Progress bar
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeRemainingColumn(),
+                console=console
+            ) as progress:
+                task = progress.add_task(f"[cyan]Cihazlar aranıyor...", total=duration)
+                
+                for i in range(duration):
+                    time.sleep(1)
+                    progress.update(task, advance=1)
+                    
+                    # Her 5 saniyede bir ara sonuçları göster
+                    if (i + 1) % 5 == 0:
+                        temp_csv = f"{output_file}-01.csv"
+                        if os.path.exists(temp_csv):
+                            # Geçici parse
+                            temp_clients = self._count_clients_in_csv(temp_csv, bssid.upper())
+                            progress.console.print(f"[dim]📊 {i+1}s: {temp_clients} cihaz bulundu...[/dim]")
+            
+            # Stop scan
+            self.stop_scan()
+            
+            console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]\n")
+            
+            # Parse results - ÖNCEKİ CLIENT'LARI TEMİZLE!
+            old_client_count = len(self.clients)
+            
+            # Sadece bu AP'ye ait client'ları temizle
+            clients_to_remove = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
+            for mac in clients_to_remove:
+                del self.clients[mac]
+            
+            console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
+            
+            # Parse new results
+            success = self.parse_scan_results(output_file)
+            
+            if success:
+                new_client_count = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
+                console.print(f"[bold green]✓ {new_client_count} cihaz bulundu![/bold green]\n")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Deep scan error: {e}")
+            console.print(f"[red]✗ Derin tarama hatası: {e}[/red]")
+            import traceback
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            return False
+    
+    def _count_clients_in_csv(self, csv_file: str, bssid: str) -> int:
+        """CSV'deki client sayısını hızlıca say (progress için)"""
+        try:
+            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Client section'ı bul
+            if 'Station MAC' in content:
+                client_section = content.split('Station MAC')[1] if 'Station MAC' in content else ""
+                # BSSID'yi içeren satırları say
+                count = content.count(bssid)
+                return max(0, count - 1)  # Header'ı çıkar
+            return 0
+        except:
+            return 0
+    
     def get_ap_by_bssid(self, bssid: str) -> Optional[AccessPoint]:
         """Get access point by BSSID"""
         return self.access_points.get(bssid.upper())
@@ -424,4 +541,5 @@ class NetworkScanner:
         """Clean up scan files"""
         self.stop_scan()
         cleanup_temp_files(f"{TEMP_DIR}/scan-*")
+        cleanup_temp_files(f"{TEMP_DIR}/deepscan-*")
 
