@@ -331,12 +331,43 @@ Bu proje eğitim amaçlıdır. Ticari kullanım yasaktır.
 
 ---
 
+## 🐛 Sorun Giderme
+
+### Ağlar Bulunamıyor?
+
+Program debug modu ile çalışır ve detaylı bilgi verir:
+
+```bash
+sudo python3 main.py
+```
+
+Debug çıktılarını izleyin:
+- ✅ CSV dosyası bulundu mu?
+- ✅ Kaç ağ parse edildi?
+- ✅ Filtreleme sonrası kaç ağ kaldı?
+
+**Detaylı rehber**: [DEBUG_GUIDE.md](DEBUG_GUIDE.md)
+
+### Manuel Test
+
+```bash
+# Wireless adapter çalışıyor mu?
+sudo airodump-ng wlan0mon
+
+# CSV oluşuyor mu?
+sudo timeout 30 airodump-ng --output-format csv -w /tmp/test wlan0mon
+cat /tmp/test-01.csv
+```
+
+---
+
 ## 📞 Destek
 
 Sorunuz veya öneriniz mi var?
 
 - 🐛 [Issue açın](https://github.com/yourusername/KYKSKN/issues)
 - 💬 [Discussions](https://github.com/yourusername/KYKSKN/discussions)
+- 📖 [Debug Rehberi](DEBUG_GUIDE.md)
 
 ---
 

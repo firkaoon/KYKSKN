@@ -142,20 +142,32 @@ class KYKSKN:
         """Scan for networks"""
         show_section_header("Ağ Tarama", "Çevredeki kablosuz ağlar taranıyor...")
         
+        console.print(f"[dim]🔍 DEBUG: Monitor interface: {self.monitor_interface}[/dim]")
+        
         self.network_scanner = NetworkScanner(self.monitor_interface)
         
         # Start scan
+        console.print(f"[yellow]⏳ 15 saniye tarama başlatılıyor...[/yellow]")
         success = self.network_scanner.start_scan(duration=15)
         
         if not success:
             show_error("Ağ taraması başarısız!")
+            console.print(f"[yellow]💡 İpucu: Log dosyasını kontrol edin: logs/kykskn_*.log[/yellow]")
             return False
         
         # Get results
+        console.print(f"[dim]🔍 DEBUG: get_sorted_aps() çağrılıyor...[/dim]")
         aps = self.network_scanner.get_sorted_aps()
         
         if not aps:
             show_error("Hiç ağ bulunamadı!")
+            console.print(f"[yellow]💡 Olası nedenler:[/yellow]")
+            console.print(f"[yellow]  • Çevrede WiFi ağı yok[/yellow]")
+            console.print(f"[yellow]  • Wireless adapter sinyal almıyor[/yellow]")
+            console.print(f"[yellow]  • Monitor mode düzgün çalışmıyor[/yellow]")
+            console.print(f"[yellow]  • Tarama süresi çok kısa (15 saniye)[/yellow]")
+            console.print()
+            console.print(f"[cyan]🔧 Test için: sudo airodump-ng {self.monitor_interface}[/cyan]")
             return False
         
         show_success(f"{len(aps)} ağ bulundu")

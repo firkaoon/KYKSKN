@@ -119,31 +119,70 @@ class NetworkScanner:
         try:
             csv_file = f"{output_file}-01.csv"
             
+            # DEBUG: Check file existence
+            console.print(f"[dim]🔍 DEBUG: CSV dosyası kontrol ediliyor: {csv_file}[/dim]")
+            
             if not os.path.exists(csv_file):
                 logger.error(f"Scan file not found: {csv_file}")
+                console.print(f"[red]✗ CSV dosyası bulunamadı: {csv_file}[/red]")
+                
+                # DEBUG: List files in temp dir
+                try:
+                    import glob
+                    files = glob.glob(f"{TEMP_DIR}/*")
+                    console.print(f"[yellow]🔍 DEBUG: Temp dizinindeki dosyalar: {files}[/yellow]")
+                except Exception as e:
+                    console.print(f"[yellow]🔍 DEBUG: Temp dizin okunamadı: {e}[/yellow]")
+                
                 return False
+            
+            console.print(f"[dim]✓ CSV dosyası bulundu[/dim]")
             
             with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
+            console.print(f"[dim]🔍 DEBUG: CSV boyutu: {len(content)} byte[/dim]")
+            
+            if len(content) < 100:
+                logger.warning("CSV file too small, possibly empty")
+                console.print(f"[yellow]⚠️  CSV dosyası çok küçük (boş olabilir): {len(content)} byte[/yellow]")
+                return False
+            
             # Split into AP and client sections
+            # Try both Windows (\r\n\r\n) and Linux (\n\n) formats
             sections = content.split('\r\n\r\n')
+            console.print(f"[dim]🔍 DEBUG: Windows format split: {len(sections)} bölüm[/dim]")
             
             if len(sections) < 2:
-                logger.warning("Incomplete scan data")
+                sections = content.split('\n\n')
+                console.print(f"[dim]🔍 DEBUG: Linux format split: {len(sections)} bölüm[/dim]")
+            
+            if len(sections) == 0:
+                logger.warning("Empty scan data")
+                console.print(f"[red]✗ CSV içeriği boş[/red]")
                 return False
             
             # Parse Access Points
             ap_lines = sections[0].strip().split('\n')
+            console.print(f"[dim]🔍 DEBUG: AP satır sayısı: {len(ap_lines)}[/dim]")
+            
             if len(ap_lines) > 1:
                 # Skip header
+                parsed_count = 0
                 for line in ap_lines[1:]:
                     if line.strip():
+                        before_count = len(self.access_points)
                         self._parse_ap_line(line)
+                        if len(self.access_points) > before_count:
+                            parsed_count += 1
+                
+                console.print(f"[dim]🔍 DEBUG: {parsed_count} AP başarıyla parse edildi[/dim]")
             
             # Parse Clients
             if len(sections) > 1:
                 client_lines = sections[1].strip().split('\n')
+                console.print(f"[dim]🔍 DEBUG: Client satır sayısı: {len(client_lines)}[/dim]")
+                
                 if len(client_lines) > 1:
                     # Skip header
                     for line in client_lines[1:]:
@@ -151,10 +190,25 @@ class NetworkScanner:
                             self._parse_client_line(line)
             
             logger.info(f"Found {len(self.access_points)} APs and {len(self.clients)} clients")
+            console.print(f"[cyan]📊 Toplam: {len(self.access_points)} ağ, {len(self.clients)} cihaz bulundu[/cyan]")
+            
+            # Check if any APs were found
+            if len(self.access_points) == 0:
+                logger.warning("No access points found in scan")
+                console.print(f"[yellow]⚠️  Hiç ağ parse edilemedi! CSV formatı kontrol ediliyor...[/yellow]")
+                # DEBUG: Show first few lines
+                console.print(f"[dim]🔍 DEBUG: CSV ilk 5 satır:[/dim]")
+                for i, line in enumerate(ap_lines[:5]):
+                    console.print(f"[dim]  {i}: {line[:100]}...[/dim]")
+                return False
+            
             return True
             
         except Exception as e:
             logger.error(f"Error parsing scan results: {e}")
+            console.print(f"[red]✗ CSV parse hatası: {e}[/red]")
+            import traceback
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
     
     def _parse_ap_line(self, line: str):
@@ -163,10 +217,12 @@ class NetworkScanner:
             parts = [p.strip() for p in line.split(',')]
             
             if len(parts) < 14:
+                logger.debug(f"AP line too short: {len(parts)} parts (need 14)")
                 return
             
             bssid = parts[0].strip()
             if not bssid or not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                logger.debug(f"Invalid BSSID format: {bssid}")
                 return
             
             # Extract data
@@ -191,6 +247,9 @@ class NetworkScanner:
             essid = parts[13].strip() if len(parts) > 13 else ""
             encryption = parts[5].strip() if len(parts) > 5 else "Unknown"
             
+            # DEBUG: Log what we're parsing
+            logger.debug(f"Parsing AP: BSSID={bssid}, ESSID={essid}, Channel={channel}, Power={power}")
+            
             if essid and bssid:
                 ap = AccessPoint(
                     bssid=bssid.upper(),
@@ -202,9 +261,13 @@ class NetworkScanner:
                     clients=[]
                 )
                 self.access_points[bssid.upper()] = ap
+                logger.debug(f"✓ AP added: {essid} ({bssid})")
+            else:
+                logger.debug(f"AP skipped: ESSID={essid}, BSSID={bssid}")
                 
         except Exception as e:
             logger.debug(f"Error parsing AP line: {e}")
+            logger.debug(f"Line content: {line[:100]}")
     
     def _parse_client_line(self, line: str):
         """Parse client line from CSV"""
@@ -254,8 +317,12 @@ class NetworkScanner:
     def get_sorted_aps(self) -> List[AccessPoint]:
         """Get access points sorted by signal strength"""
         aps = list(self.access_points.values())
+        console.print(f"[dim]🔍 DEBUG: get_sorted_aps - Toplam {len(aps)} ağ[/dim]")
+        
         # Filter out APs with no ESSID or very weak signal
         aps = [ap for ap in aps if ap.essid and ap.power > -100]
+        console.print(f"[dim]🔍 DEBUG: Filtreleme sonrası {len(aps)} ağ (ESSID var ve sinyal > -100)[/dim]")
+        
         # Sort by signal strength (strongest first)
         aps.sort(key=lambda x: x.power, reverse=True)
         return aps
