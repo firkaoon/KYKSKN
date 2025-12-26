@@ -56,8 +56,8 @@ class NetworkScanner:
         # Create temp directory
         os.makedirs(TEMP_DIR, exist_ok=True)
     
-    def start_scan(self, channel: Optional[int] = None, duration: int = SCAN_TIMEOUT) -> bool:
-        """Start airodump-ng scan"""
+    def start_scan(self, channel: Optional[int] = None, duration: Optional[int] = SCAN_TIMEOUT) -> bool:
+        """Start airodump-ng scan - duration=None ise sonsuz tarama"""
         try:
             # Clean up old scan files
             cleanup_temp_files(f"{TEMP_DIR}/scan-*")
@@ -78,7 +78,6 @@ class NetworkScanner:
             cmd.append(self.interface)
             
             logger.info(f"Starting scan: {' '.join(cmd)}")
-            console.print(f"[yellow]📡 Ağlar taranıyor... ({duration} saniye)[/yellow]")
             
             # Start airodump-ng in background
             self.scan_process = subprocess.Popen(
@@ -87,11 +86,21 @@ class NetworkScanner:
                 stderr=subprocess.DEVNULL
             )
             
-            # Wait for scan duration
-            time.sleep(duration)
-            
-            # Stop scan
-            self.stop_scan()
+            if duration is None:
+                # SONSUZ TARAMA - Kullanıcı Ctrl+C ile durduracak
+                console.print(f"[yellow]📡 Ağlar taranıyor... (Sonsuz - Ctrl+C ile durdurun)[/yellow]")
+                try:
+                    # Process çalışırken bekle (sonsuz döngü)
+                    while self.scan_process.poll() is None:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    console.print(f"\n[yellow]⚠️  Tarama durduruluyor...[/yellow]")
+                    self.stop_scan()
+            else:
+                # Sınırlı süre
+                console.print(f"[yellow]📡 Ağlar taranıyor... ({duration} saniye)[/yellow]")
+                time.sleep(duration)
+                self.stop_scan()
             
             # Parse results
             return self.parse_scan_results(output_file)
@@ -213,16 +222,17 @@ class NetworkScanner:
                             console.print(f"[dim]🔍 DEBUG: Client header satırı: {i}[/dim]")
                             break
                     
-                    # Parse lines after header
+                    # Parse lines after header - TÜM SATIRLARI PARSE ET
                     parsed_clients = 0
                     for line in client_lines[header_idx + 1:]:
-                        if line.strip() and not line.startswith('#'):
+                        line = line.strip()
+                        if line and not line.startswith('#'):
                             before_count = len(self.clients)
                             self._parse_client_line(line)
                             if len(self.clients) > before_count:
                                 parsed_clients += 1
                     
-                    console.print(f"[dim]🔍 DEBUG: {parsed_clients} client başarıyla parse edildi[/dim]")
+                    console.print(f"[dim]🔍 DEBUG: {parsed_clients} yeni client parse edildi, toplam: {len(self.clients)}[/dim]")
             else:
                 console.print(f"[yellow]⚠️  Client section bulunamadı (sadece 1 bölüm var)[/yellow]")
             
@@ -310,48 +320,55 @@ class NetworkScanner:
             logger.debug(f"Line content: {line[:100]}")
     
     def _parse_client_line(self, line: str):
-        """Parse client line from CSV"""
+        """Parse client line from CSV - İYİLEŞTİRİLMİŞ VERSİYON"""
         try:
-            parts = [p.strip() for p in line.split(',')]
+            # CSV parsing - tırnak içindeki alanları dikkate al
+            import csv as csv_module
+            try:
+                reader = csv_module.reader([line])
+                parts = next(reader)
+                parts = [p.strip() for p in parts]
+            except:
+                # Fallback: basit split
+                parts = [p.strip() for p in line.split(',')]
             
             if len(parts) < 6:
-                logger.debug(f"Client line too short: {len(parts)} parts (need 6)")
+                logger.debug(f"Client line too short: {len(parts)} parts")
                 return
             
             client_mac = parts[0].strip()
             if not client_mac or not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
-                console.print(f"[dim]⚠️  Invalid client MAC format: {client_mac}[/dim]")
-                logger.debug(f"Invalid client MAC format: {client_mac}")
                 return
             
-            bssid = parts[5].strip()
-            if not bssid or bssid == '(not associated)':
-                console.print(f"[dim]⚠️  Client not associated: {client_mac}[/dim]")
-                logger.debug(f"Client not associated: {client_mac}")
+            # BSSID - Farklı kolonları dene (airodump-ng versiyonuna göre değişebilir)
+            bssid = None
+            for idx in [5, 6, 7]:  # Farklı kolonları dene
+                if idx < len(parts):
+                    potential_bssid = parts[idx].strip()
+                    if potential_bssid and potential_bssid != '(not associated)':
+                        if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', potential_bssid):
+                            bssid = potential_bssid
+                            break
+            
+            if not bssid:
+                # BSSID bulunamadı - skip et
+                logger.debug(f"Client {client_mac} has no valid BSSID")
                 return
             
-            # Validate BSSID format
-            if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
-                console.print(f"[red]⚠️  Invalid BSSID format for client {client_mac}: '{bssid}'[/red]")
-                logger.debug(f"Invalid BSSID format for client: {bssid}")
-                return
-            
-            power_str = parts[3].strip()
+            # Power ve packets
+            power = -100
+            packets = 0
             try:
-                power = int(power_str) if power_str.lstrip('-').isdigit() else -100
+                if len(parts) > 3:
+                    power_str = parts[3].strip()
+                    power = int(power_str) if power_str.lstrip('-').isdigit() else -100
+                if len(parts) > 4:
+                    packets_str = parts[4].strip()
+                    packets = int(packets_str) if packets_str.isdigit() else 0
             except:
-                power = -100
+                pass
             
-            packets_str = parts[4].strip()
-            try:
-                packets = int(packets_str) if packets_str.isdigit() else 0
-            except:
-                packets = 0
-            
-            # DEBUG: Log what we're parsing
-            console.print(f"[dim]🔍 Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}, Packets={packets}[/dim]")
-            logger.info(f"Parsing Client: MAC={client_mac}, BSSID={bssid}")
-            
+            # Client oluştur
             client = Client(
                 mac=client_mac.upper(),
                 bssid=bssid.upper(),
@@ -359,20 +376,28 @@ class NetworkScanner:
                 packets=packets
             )
             
-            self.clients[client_mac.upper()] = client
-            console.print(f"[green]✓ Client added to database: {client_mac} -> {bssid}[/green]")
-            logger.info(f"✓ Client added: {client_mac} -> {bssid}")
+            # Eğer zaten varsa güncelle, yoksa ekle
+            if client_mac.upper() in self.clients:
+                # Mevcut client'ı güncelle (daha güçlü sinyali al)
+                existing = self.clients[client_mac.upper()]
+                existing.power = max(existing.power, power)
+                existing.packets += packets
+                # BSSID değişmişse güncelle
+                if bssid.upper() != existing.bssid.upper():
+                    existing.bssid = bssid.upper()
+            else:
+                # Yeni client ekle
+                self.clients[client_mac.upper()] = client
+                console.print(f"[green]✓ Client added: {client_mac} -> {bssid}[/green]")
+                logger.info(f"✓ Client added: {client_mac} -> {bssid}")
             
-            # Add client to AP's client list
+            # AP'ye bağla
             if bssid.upper() in self.access_points:
                 if client_mac.upper() not in self.access_points[bssid.upper()].clients:
                     self.access_points[bssid.upper()].clients.append(client_mac.upper())
-                    console.print(f"[green]✓✓ Client linked to AP: {client_mac} -> {bssid}[/green]")
                     logger.info(f"✓ Client linked to AP: {client_mac} -> {bssid}")
             else:
-                console.print(f"[red]⚠️  AP NOT FOUND for client {client_mac}! Looking for BSSID: {bssid}[/red]")
-                console.print(f"[yellow]Available APs: {list(self.access_points.keys())}[/yellow]")
-                logger.warning(f"⚠️  AP not found for client: {bssid}")
+                logger.debug(f"AP not found for client: {bssid}")
                     
         except Exception as e:
             logger.debug(f"Error parsing client line: {e}")
@@ -464,6 +489,9 @@ class NetworkScanner:
             # Progress bar
             from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
             
+            # REAL-TIME MONITORING - Her 3 saniyede CSV'yi parse et ve yeni client'ları göster
+            seen_clients = set()
+            
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[bold blue]{task.description}"),
@@ -472,19 +500,27 @@ class NetworkScanner:
                 TimeRemainingColumn(),
                 console=console
             ) as progress:
-                task = progress.add_task(f"[cyan]Cihazlar aranıyor...", total=duration)
+                task = progress.add_task(f"[cyan]Cihazlar aranıyor (REAL-TIME)...", total=duration)
                 
                 for i in range(duration):
                     time.sleep(1)
                     progress.update(task, advance=1)
                     
-                    # Her 5 saniyede bir ara sonuçları göster
-                    if (i + 1) % 5 == 0:
+                    # Her 3 saniyede bir REAL-TIME parse
+                    if (i + 1) % 3 == 0:
                         temp_csv = f"{output_file}-01.csv"
                         if os.path.exists(temp_csv):
-                            # Geçici parse
-                            temp_clients = self._count_clients_in_csv(temp_csv, bssid.upper())
-                            progress.console.print(f"[dim]📊 {i+1}s: {temp_clients} cihaz bulundu...[/dim]")
+                            # Parse CSV ve yeni client'ları bul
+                            new_clients = self._parse_clients_realtime(temp_csv, bssid.upper(), seen_clients)
+                            
+                            if new_clients:
+                                for client_mac in new_clients:
+                                    progress.console.print(f"[bold green]🆕 YENİ CİHAZ BULUNDU: {client_mac}[/bold green]")
+                                    seen_clients.add(client_mac)
+                            
+                            # Toplam sayıyı göster
+                            total_count = len(seen_clients)
+                            progress.console.print(f"[cyan]📊 {i+1}s: Toplam {total_count} cihaz[/cyan]")
             
             # Stop scan
             self.stop_scan()
@@ -516,6 +552,85 @@ class NetworkScanner:
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
+    
+    def _parse_clients_realtime(self, csv_file: str, target_bssid: str, seen_clients: set) -> list:
+        """
+        REAL-TIME CLIENT PARSING
+        CSV'yi parse et ve yeni bulunan client'ları döndür
+        """
+        new_clients = []
+        
+        try:
+            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Client section'ı bul
+            if 'Station MAC' not in content:
+                return new_clients
+            
+            parts = content.split('Station MAC')
+            if len(parts) < 2:
+                return new_clients
+            
+            client_section = parts[1]
+            lines = client_section.strip().split('\n')
+            
+            # Her satırı parse et
+            for line in lines[1:]:  # İlk satır header
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # CSV parse
+                cols = [c.strip() for c in line.split(',')]
+                if len(cols) < 6:
+                    continue
+                
+                client_mac = cols[0].strip().upper()
+                bssid = cols[5].strip().upper()
+                
+                # MAC format kontrolü
+                if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                    continue
+                
+                # BSSID kontrolü
+                if bssid != target_bssid.upper():
+                    continue
+                
+                # Yeni client mi?
+                if client_mac not in seen_clients:
+                    new_clients.append(client_mac)
+                    
+                    # Hemen database'e ekle
+                    try:
+                        power = int(cols[3].strip()) if cols[3].strip().lstrip('-').isdigit() else -100
+                    except:
+                        power = -100
+                    
+                    try:
+                        packets = int(cols[4].strip()) if cols[4].strip().isdigit() else 0
+                    except:
+                        packets = 0
+                    
+                    client = Client(
+                        mac=client_mac,
+                        bssid=bssid,
+                        power=power,
+                        packets=packets
+                    )
+                    
+                    self.clients[client_mac] = client
+                    
+                    # AP'ye bağla
+                    if bssid in self.access_points:
+                        if client_mac not in self.access_points[bssid].clients:
+                            self.access_points[bssid].clients.append(client_mac)
+            
+            return new_clients
+            
+        except Exception as e:
+            logger.debug(f"Error in real-time parse: {e}")
+            return new_clients
     
     def _count_clients_in_csv(self, csv_file: str, bssid: str) -> int:
         """CSV'deki client sayısını hızlıca say (progress için)"""
