@@ -580,7 +580,8 @@ class NetworkScanner:
     
     def deep_scan_ap(self, bssid: str, channel: int, duration: int = 60) -> bool:
         """
-        Basit derin tarama - sadece airodump-ng --bssid --channel komutu
+        GARANTİLİ DERİN TARAMA - Manuel komutu tam taklit eder
+        airodump-ng --bssid <BSSID> --channel <CHANNEL> <INTERFACE>
         
         Args:
             bssid: Target AP BSSID
@@ -591,8 +592,12 @@ class NetworkScanner:
             bool: True if successful
         """
         try:
-            console.print(f"\n[bold yellow]🔍 DEEP SCAN STARTING...[/bold yellow]")
-            console.print(f"[cyan]📡 Target: {bssid}[/cyan]")
+            target_bssid_upper = bssid.upper()
+            
+            console.print(f"\n[bold yellow]{'═' * 80}[/bold yellow]")
+            console.print(f"[bold yellow]🔍 GARANTİLİ DERİN TARAMA BAŞLIYOR[/bold yellow]")
+            console.print(f"[bold yellow]{'═' * 80}[/bold yellow]\n")
+            console.print(f"[cyan]📡 Target BSSID: {target_bssid_upper}[/cyan]")
             console.print(f"[cyan]📻 Channel: {channel}[/cyan]")
             console.print(f"[cyan]⏱️  Duration: {duration} seconds[/cyan]\n")
             
@@ -601,13 +606,13 @@ class NetworkScanner:
             
             output_file = f"{TEMP_DIR}/deepscan"
             
-            # BASIT KOMUT: airodump-ng --bssid <BSSID> --channel <CHANNEL> <INTERFACE>
-            # CSV çıktısı için -w parametresi ekliyoruz
+            # MANUEL KOMUTU TAM TAKLİT ET: airodump-ng --bssid XX --channel YY wlan0
             cmd = [
                 'airodump-ng',
-                '--bssid', bssid.upper(),
+                '--bssid', target_bssid_upper,
                 '--channel', str(channel),
                 '-w', output_file,  # CSV çıktısı için
+                '--write-interval', '2',  # 2 saniyede bir yaz (daha güvenli)
                 self.interface
             ]
             
@@ -625,34 +630,94 @@ class NetworkScanner:
             console.print(f"[yellow]📡 Tarama yapılıyor... ({duration} saniye)[/yellow]")
             time.sleep(duration)
             
+            # CRITICAL: Buffer flush için yeterli bekleme (CSV yazılması için)
+            console.print(f"[dim]⏳ Buffer flush bekleniyor... (10 saniye)[/dim]")
+            time.sleep(10)  # Artırıldı: 10 saniye
+            
             # Stop scan gracefully
             self.stop_scan()
             
+            # CRITICAL: Ekstra bekleme (filesystem sync için)
+            console.print(f"[dim]⏳ Dosya senkronizasyonu bekleniyor... (3 saniye)[/dim]")
+            time.sleep(3)
+            
             console.print(f"[green]✓ Derin tarama tamamlandı![/green]\n")
             
-            # ÖNCEKİ CLIENT'LARI TEMİZLE (sadece bu AP'ye ait olanlar)
-            clients_to_remove = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
-            for mac in clients_to_remove:
-                del self.clients[mac]
-            
-            if clients_to_remove:
-                console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
-            
-            # CSV dosyasını parse et
+            # CSV dosyasını kontrol et
             csv_file = f"{output_file}-01.csv"
             
             if not os.path.exists(csv_file):
                 console.print(f"[red]✗ CSV dosyası bulunamadı: {csv_file}[/red]")
                 return False
             
-            # CSV'yi parse et
-            success = self.parse_scan_results(output_file)
+            # CSV dosya boyutunu kontrol et
+            csv_size = os.path.getsize(csv_file)
+            console.print(f"[dim]🔍 CSV dosya boyutu: {csv_size} bytes[/dim]")
             
-            if success:
-                new_client_count = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
-                console.print(f"[bold green]✓ {new_client_count} cihaz bulundu![/bold green]\n")
+            if csv_size < 100:
+                console.print(f"[yellow]⚠️  CSV dosyası çok küçük (boş olabilir)[/yellow]")
+                # Yine de parse etmeyi dene
             
-            return success
+            # ═══════════════════════════════════════════════════════════════
+            # CRITICAL FIX: ÖNCE PARSE ET, SONRA TEMİZLE!
+            # ═══════════════════════════════════════════════════════════════
+            
+            # ÖNCE: Bu AP'ye ait TÜM client'ları geçici olarak işaretle
+            clients_before_parse = set(self.clients.keys())
+            
+            # CSV'yi ÖZEL parsing ile parse et (sadece client'lar için)
+            console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+            console.print(f"[bold cyan]CSV PARSING BAŞLIYOR[/bold cyan]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+            
+            parsed_clients = self._parse_deep_scan_csv(csv_file, target_bssid_upper)
+            
+            console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+            console.print(f"[bold cyan]PARSING SONUÇLARI[/bold cyan]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+            console.print(f"[green]✓ CSV'den {len(parsed_clients)} client parse edildi[/green]\n")
+            
+            # SONRA: Bu AP'ye ait OLMAYAN eski client'ları temizle
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]")
+            console.print(f"[bold cyan]CLIENT TEMİZLEME İŞLEMİ[/bold cyan]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+            
+            # Bu AP'ye ait client'ları bul
+            clients_for_this_ap = []
+            clients_to_remove = []
+            
+            for mac, client in self.clients.items():
+                if client.bssid.upper() == target_bssid_upper:
+                    clients_for_this_ap.append(mac)
+                else:
+                    # Bu AP'ye ait değilse, eski taramadan kalmış olabilir
+                    clients_to_remove.append(mac)
+            
+            # Eski client'ları temizle (sadece bu AP'ye ait olmayanlar)
+            if clients_to_remove:
+                console.print(f"[yellow]🔄 Eski client'lar temizleniyor: {len(clients_to_remove)} adet[/yellow]")
+                for mac in clients_to_remove:
+                    del self.clients[mac]
+                    console.print(f"[dim]  ✗ Silindi: {mac}[/dim]")
+            
+            # Final client sayısı
+            final_count = len(clients_for_this_ap)
+            
+            console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+            console.print(f"[bold green]✓ TARAMA TAMAMLANDI: {final_count} cihaz bulundu![/bold green]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+            
+            if final_count > 0:
+                console.print(f"[cyan]📋 Bulunan cihazlar:[/cyan]")
+                for mac in clients_for_this_ap:
+                    client = self.clients[mac]
+                    console.print(f"[cyan]  • {mac} ({client.power} dBm, {client.packets} pkts)[/cyan]")
+                console.print()
+            else:
+                console.print(f"[yellow]⚠️  Hiç cihaz bulunamadı![/yellow]")
+                console.print(f"[yellow]💡 Manuel kontrol için: cat {csv_file}[/yellow]\n")
+            
+            return final_count > 0
             
         except Exception as e:
             logger.error(f"Deep scan error: {e}")
@@ -660,6 +725,164 @@ class NetworkScanner:
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
+    
+    def _parse_deep_scan_csv(self, csv_file: str, target_bssid: str) -> List[str]:
+        """
+        GARANTİLİ CSV PARSING - Deep scan için özel metod
+        CSV'yi satır satır okuyup TÜM client'ları bulur
+        
+        Args:
+            csv_file: CSV dosya yolu
+            target_bssid: Hedef AP BSSID
+            
+        Returns:
+            List[str]: Parse edilen client MAC'leri
+        """
+        parsed_clients = []
+        target_bssid_upper = target_bssid.upper()
+        
+        try:
+            # CSV'yi oku
+            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            console.print(f"[dim]🔍 CSV içeriği okundu: {len(content)} karakter[/dim]")
+            
+            # CSV formatını kontrol et - birden fazla yöntem dene
+            lines = content.split('\n')
+            console.print(f"[dim]🔍 Toplam satır sayısı: {len(lines)}[/dim]")
+            
+            # Client section'ı bul (birden fazla yöntem)
+            client_section_start = -1
+            
+            # Yöntem 1: "Station MAC" header'ını bul
+            for i, line in enumerate(lines):
+                if 'Station MAC' in line or 'station' in line.lower():
+                    client_section_start = i
+                    console.print(f"[green]✓ Client section bulundu (yöntem 1): Satır {i}[/green]")
+                    console.print(f"[dim]  Header: {line[:100]}[/dim]")
+                    break
+            
+            # Yöntem 2: Boş satır sonrası client section olabilir
+            if client_section_start == -1:
+                for i, line in enumerate(lines):
+                    if i > 0 and not lines[i-1].strip() and line.strip():
+                        # Önceki satır boş, bu satır dolu - client section başlangıcı olabilir
+                        if ',' in line and len(line.split(',')) >= 6:
+                            # MAC adresi formatı kontrolü
+                            parts = line.split(',')
+                            if len(parts) > 0 and re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', parts[0].strip()):
+                                client_section_start = i
+                                console.print(f"[green]✓ Client section bulundu (yöntem 2): Satır {i}[/green]")
+                                break
+            
+            if client_section_start == -1:
+                console.print(f"[yellow]⚠️  Client section header bulunamadı, tüm satırları kontrol ediyorum...[/yellow]")
+                # Tüm satırları kontrol et
+                client_section_start = 0
+            
+            # Client satırlarını parse et
+            console.print(f"\n[bold cyan]CLIENT SATIRLARI PARSİNG[/bold cyan]\n")
+            
+            clients_found = 0
+            for i, line in enumerate(lines[client_section_start:], start=client_section_start):
+                line = line.strip()
+                if not line or line.startswith('#') or 'BSSID' in line or 'Station MAC' in line:
+                    continue
+                
+                # CSV parsing
+                try:
+                    import csv as csv_module
+                    reader = csv_module.reader([line])
+                    parts = next(reader)
+                    parts = [p.strip() for p in parts]
+                    
+                    if len(parts) < 6:
+                        continue
+                    
+                    # CSV FORMAT:
+                    # 0: Station MAC
+                    # 1: First time seen
+                    # 2: Last time seen
+                    # 3: Power
+                    # 4: # packets
+                    # 5: BSSID
+                    # 6: Probed ESSIDs
+                    
+                    client_mac = parts[0].strip().upper()
+                    bssid = parts[5].strip().upper()
+                    
+                    # MAC format validation
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                        continue
+                    
+                    # BSSID format validation
+                    if not bssid or bssid == '(NOT ASSOCIATED)':
+                        continue
+                    
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                        continue
+                    
+                    # Sadece target BSSID'ye ait client'ları al
+                    if bssid != target_bssid_upper:
+                        continue
+                    
+                    # Parse power and packets
+                    power = -100
+                    packets = 0
+                    try:
+                        power_str = parts[3].strip()
+                        power = int(power_str) if power_str.lstrip('-').isdigit() else -100
+                    except:
+                        pass
+                    
+                    try:
+                        packets_str = parts[4].strip()
+                        packets = int(packets_str) if packets_str.isdigit() else 0
+                    except:
+                        pass
+                    
+                    # Client'i ekle veya güncelle
+                    if client_mac in self.clients:
+                        # UPDATE existing
+                        existing = self.clients[client_mac]
+                        existing.power = max(existing.power, power)
+                        existing.packets += packets
+                        existing.bssid = bssid
+                        console.print(f"[yellow]⟳ Client güncellendi: {client_mac} ({power} dBm, {packets} pkts)[/yellow]")
+                    else:
+                        # ADD new client
+                        client = Client(
+                            mac=client_mac,
+                            bssid=bssid,
+                            power=power,
+                            packets=packets
+                        )
+                        self.clients[client_mac] = client
+                        parsed_clients.append(client_mac)
+                        clients_found += 1
+                        console.print(f"[bold green]✓ YENİ CLIENT: {client_mac} ({power} dBm, {packets} pkts)[/bold green]")
+                        logger.info(f"New client found: {client_mac} -> {bssid}")
+                    
+                    # Link to AP
+                    if bssid in self.access_points:
+                        if client_mac not in self.access_points[bssid].clients:
+                            self.access_points[bssid].clients.append(client_mac)
+                    
+                except Exception as line_error:
+                    logger.debug(f"Error parsing line {i}: {line_error}")
+                    continue
+            
+            console.print(f"\n[green]✓ Toplam {clients_found} yeni client bulundu[/green]")
+            
+            return parsed_clients
+            
+        except Exception as e:
+            logger.error(f"Error parsing deep scan CSV: {e}")
+            console.print(f"[red]✗ CSV parsing hatası: {e}[/red]")
+            import traceback
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            return parsed_clients
     
     def _parse_clients_realtime(self, csv_file: str, target_bssid: str, seen_clients: set) -> list:
         """
