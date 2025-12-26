@@ -19,15 +19,14 @@ def show_banner():
     # Create banner text
     banner_text = Text()
     
-    # ASCII art with gradient effect
-    colors = ["cyan", "bright_cyan", "blue", "bright_blue", "magenta", "bright_magenta"]
+    # ASCII art with gradient effect - basit renkler kullan
+    colors = ["bold cyan", "bold bright_cyan", "bold blue", "bold bright_blue", "bold magenta", "bold bright_magenta"]
     lines = ascii_art.split('\n')
     for i, line in enumerate(lines):
         if line.strip():
             color_index = (i // 2) % len(colors)
-            color_name = colors[color_index]
-            # Rich style string formatı - güvenli şekilde
-            banner_text.append(line + '\n', style=f"bold {color_name}")
+            # Direkt stil string kullan (f-string veya + kullanma)
+            banner_text.append(line + '\n', style=colors[color_index])
     
     banner_text.append("\n", style="")
     
@@ -38,13 +37,15 @@ def show_banner():
     creator_text.append(" " * 10, style="")
     
     creator_name = "Created by Firkaoon"
-    gradient_colors = ["cyan", "bright_cyan", "blue", "bright_blue", "magenta", "bright_magenta", "yellow", "bright_yellow"]
+    # Direkt stil string'leri kullan (f-string veya + kullanma)
+    gradient_styles = ["bold cyan", "bold bright_cyan", "bold blue", "bold bright_blue", 
+                      "bold magenta", "bold bright_magenta", "bold yellow", "bold bright_yellow"]
     for idx, char in enumerate(creator_name):
         if char == ' ':
             creator_text.append(char, style="")
         else:
-            color = gradient_colors[idx % len(gradient_colors)]
-            creator_text.append(char, style=f"bold {color}")
+            style = gradient_styles[idx % len(gradient_styles)]
+            creator_text.append(char, style=style)
     
     creator_text.append(" " * 10, style="")
     creator_text.append("║\n", style="bright_cyan")
@@ -53,13 +54,13 @@ def show_banner():
     banner_text.append(creator_text)
     banner_text.append(f"\n{' ' * 15}Version {APP_VERSION} - 2025\n", style="dim white")
     
-    # Panel oluştur (Align.center kullanmadan - Rich'in kendi merkezleme özelliği var)
+    # Panel oluştur - title'ı basit string yap (markdown sorun çıkarabilir)
     panel = Panel(
         banner_text,
         border_style="bright_cyan",
         box="double",
         padding=(2, 4),
-        title="[bold bright_cyan]╔═══ KYKSKN ═══╗[/bold bright_cyan]",
+        title="╔═══ KYKSKN ═══╗",
         title_align="center"
     )
     
@@ -81,7 +82,7 @@ def show_legal_warning():
     
     panel = Panel(
         warning_text,
-        title="[bold red]UYARI[/bold red]",
+        title="UYARI",
         border_style="red",
         padding=(1, 2)
     )
