@@ -38,6 +38,7 @@ class Client:
     mac: str
     bssid: str
     power: int
+    packets: int
     
     def __str__(self):
         return f"{self.mac} -> {self.bssid} ({self.power}dBm)"
@@ -119,10 +120,7 @@ class NetworkScanner:
             csv_file = f"{output_file}-01.csv"
             
             # DEBUG: Check file existence
-            console.print(f"[bold cyan]🔍 DEBUG: CSV PARSE BAŞLIYOR[/bold cyan]")
-            console.print(f"[cyan]📁 Output file base: {output_file}[/cyan]")
-            console.print(f"[cyan]📄 CSV dosyası: {csv_file}[/cyan]")
-            console.print(f"[dim]🔍 DEBUG: Dosya varlık kontrolü yapılıyor...[/dim]")
+            console.print(f"[dim]🔍 DEBUG: CSV dosyası kontrol ediliyor: {csv_file}[/dim]")
             
             if not os.path.exists(csv_file):
                 logger.error(f"Scan file not found: {csv_file}")
@@ -199,6 +197,10 @@ class NetworkScanner:
             # Parse Clients
             if len(sections) > 1:
                 client_section = sections[1].strip()
+                
+                # DEBUG: Show first 200 chars of client section
+                console.print(f"[dim]🔍 DEBUG: Client section başlangıcı: {client_section[:200]}...[/dim]")
+                
                 client_lines = client_section.split('\n')
                 console.print(f"[dim]🔍 DEBUG: Client satır sayısı: {len(client_lines)}[/dim]")
                 
@@ -282,7 +284,10 @@ class NetworkScanner:
             essid = parts[13].strip() if len(parts) > 13 else ""
             encryption = parts[5].strip() if len(parts) > 5 else "Unknown"
             
-            # Create AP
+            # DEBUG: Log what we're parsing
+            console.print(f"[dim]🔍 Parsing AP: BSSID={bssid}, ESSID={essid}, Channel={channel}, Power={power}[/dim]")
+            logger.info(f"Parsing AP: BSSID={bssid}, ESSID={essid}")
+            
             if essid and bssid:
                 ap = AccessPoint(
                     bssid=bssid.upper(),
@@ -294,7 +299,11 @@ class NetworkScanner:
                     clients=[]
                 )
                 self.access_points[bssid.upper()] = ap
+                console.print(f"[green]✓ AP added: {essid} ({bssid.upper()})[/green]")
                 logger.info(f"✓ AP added: {essid} ({bssid})")
+            else:
+                console.print(f"[yellow]⚠️  AP skipped: ESSID={essid}, BSSID={bssid}[/yellow]")
+                logger.info(f"AP skipped: ESSID={essid}, BSSID={bssid}")
                 
         except Exception as e:
             logger.debug(f"Error parsing AP line: {e}")
@@ -333,21 +342,37 @@ class NetworkScanner:
             except:
                 power = -100
             
-            # Create client
+            packets_str = parts[4].strip()
+            try:
+                packets = int(packets_str) if packets_str.isdigit() else 0
+            except:
+                packets = 0
+            
+            # DEBUG: Log what we're parsing
+            console.print(f"[dim]🔍 Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}, Packets={packets}[/dim]")
+            logger.info(f"Parsing Client: MAC={client_mac}, BSSID={bssid}")
+            
             client = Client(
                 mac=client_mac.upper(),
                 bssid=bssid.upper(),
-                power=power
+                power=power,
+                packets=packets
             )
             
             self.clients[client_mac.upper()] = client
+            console.print(f"[green]✓ Client added to database: {client_mac} -> {bssid}[/green]")
             logger.info(f"✓ Client added: {client_mac} -> {bssid}")
             
-            # Add client to AP's client list (if AP exists)
+            # Add client to AP's client list
             if bssid.upper() in self.access_points:
                 if client_mac.upper() not in self.access_points[bssid.upper()].clients:
                     self.access_points[bssid.upper()].clients.append(client_mac.upper())
+                    console.print(f"[green]✓✓ Client linked to AP: {client_mac} -> {bssid}[/green]")
                     logger.info(f"✓ Client linked to AP: {client_mac} -> {bssid}")
+            else:
+                console.print(f"[red]⚠️  AP NOT FOUND for client {client_mac}! Looking for BSSID: {bssid}[/red]")
+                console.print(f"[yellow]Available APs: {list(self.access_points.keys())}[/yellow]")
+                logger.warning(f"⚠️  AP not found for client: {bssid}")
                     
         except Exception as e:
             logger.debug(f"Error parsing client line: {e}")
@@ -407,7 +432,7 @@ class NetworkScanner:
             console.print(f"\n[bold yellow]🔍 DERİN TARAMA BAŞLATILIYOR...[/bold yellow]")
             console.print(f"[cyan]📡 Hedef: {bssid}[/cyan]")
             console.print(f"[cyan]📻 Kanal: {channel}[/cyan]")
-            console.print(f"[cyan]⏱️  Süre: {duration} saniye ({duration//60} dakika)[/cyan]")
+            console.print(f"[cyan]⏱️  Süre: {duration} saniye[/cyan]")
             console.print(f"[dim]💡 Bu tarama seçilen ağdaki TÜM cihazları bulacak...[/dim]\n")
             
             # Clean up old scan files
@@ -466,115 +491,28 @@ class NetworkScanner:
             
             console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]\n")
             
-            # KRİTİK: SADECE BU AP'YE AİT CLIENT'LARI TEMİZLE!
-            console.print(f"[dim]🔄 Bu AP'ye ait eski client'lar temizleniyor...[/dim]")
-            old_clients = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
-            for mac in old_clients:
-                del self.clients[mac]
-            console.print(f"[dim]🔄 {len(old_clients)} eski client temizlendi[/dim]")
+            # Parse results - ÖNCEKİ CLIENT'LARI TEMİZLE!
+            old_client_count = len(self.clients)
             
-            # Parse new results - SADECE CLIENT'LARI PARSE ET, AP'LERİ DEĞİL!
-            console.print(f"[cyan]📊 Derin tarama sonuçları parse ediliyor (SADECE CLIENT'LAR)...[/cyan]")
-            success = self._parse_clients_only(output_file, bssid.upper())
+            # Sadece bu AP'ye ait client'ları temizle
+            clients_to_remove = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
+            for mac in clients_to_remove:
+                del self.clients[mac]
+            
+            console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
+            
+            # Parse new results
+            success = self.parse_scan_results(output_file)
             
             if success:
-                # Bu AP'ye ait client'ları say
                 new_client_count = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
-                
                 console.print(f"[bold green]✓ {new_client_count} cihaz bulundu![/bold green]\n")
-                
-                # DEBUG: Bu AP'ye ait client'ları listele
-                console.print(f"[dim]🔍 DEBUG: Bulunan client'lar:[/dim]")
-                for mac, client in self.clients.items():
-                    if client.bssid.upper() == bssid.upper():
-                        console.print(f"[dim]  • {mac} -> {client.bssid} ({client.power} dBm)[/dim]")
-            else:
-                console.print(f"[red]✗ Parse başarısız![/red]")
             
             return success
             
         except Exception as e:
             logger.error(f"Deep scan error: {e}")
             console.print(f"[red]✗ Derin tarama hatası: {e}[/red]")
-            import traceback
-            console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            return False
-    
-    def _parse_clients_only(self, output_file: str, target_bssid: str) -> bool:
-        """
-        SADECE CLIENT'LARI parse et - AP'lere dokunma!
-        Deep scan için özel metod.
-        """
-        try:
-            csv_file = f"{output_file}-01.csv"
-            
-            console.print(f"[bold cyan]🔍 CLIENT-ONLY PARSE BAŞLIYOR[/bold cyan]")
-            console.print(f"[cyan]📄 CSV dosyası: {csv_file}[/cyan]")
-            console.print(f"[cyan]🎯 Hedef BSSID: {target_bssid}[/cyan]")
-            
-            if not os.path.exists(csv_file):
-                logger.error(f"CSV file not found: {csv_file}")
-                console.print(f"[red]✗ CSV dosyası bulunamadı: {csv_file}[/red]")
-                return False
-            
-            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            console.print(f"[dim]📊 CSV boyutu: {len(content)} byte[/dim]")
-            
-            if len(content) < 50:
-                console.print(f"[red]✗ CSV çok küçük![/red]")
-                return False
-            
-            # Client section'ı bul
-            if 'Station MAC' not in content:
-                console.print(f"[red]✗ 'Station MAC' header bulunamadı![/red]")
-                return False
-            
-            # Split by "Station MAC"
-            parts = content.split('Station MAC')
-            if len(parts) < 2:
-                console.print(f"[red]✗ Client section bulunamadı![/red]")
-                return False
-            
-            client_section = parts[1].strip()
-            console.print(f"[green]✓ Client section bulundu ({len(client_section)} byte)[/green]")
-            
-            # Parse client lines
-            lines = client_section.split('\n')
-            console.print(f"[cyan]📊 Toplam {len(lines)} satır[/cyan]")
-            
-            parsed_count = 0
-            skipped_count = 0
-            
-            # İlk satır header, atla
-            for idx, line in enumerate(lines[1:], start=1):
-                line_stripped = line.strip()
-                
-                if not line_stripped or line_stripped.startswith('#'):
-                    skipped_count += 1
-                    continue
-                
-                console.print(f"[yellow]🔍 Satır {idx}: {line_stripped[:80]}...[/yellow]")
-                
-                before_count = len(self.clients)
-                self._parse_client_line(line)
-                
-                if len(self.clients) > before_count:
-                    parsed_count += 1
-                    console.print(f"[green]  ✓ Client eklendi! (Toplam: {len(self.clients)})[/green]")
-                else:
-                    console.print(f"[red]  ✗ Client eklenemedi![/red]")
-                    skipped_count += 1
-            
-            console.print(f"[bold green]✓ {parsed_count} client parse edildi[/bold green]")
-            console.print(f"[dim]⚠️  {skipped_count} satır atlandı[/dim]")
-            
-            return parsed_count > 0
-            
-        except Exception as e:
-            logger.error(f"Error parsing clients only: {e}")
-            console.print(f"[red]✗ Parse hatası: {e}[/red]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
@@ -586,35 +524,13 @@ class NetworkScanner:
                 content = f.read()
             
             # Client section'ı bul
-            if 'Station MAC' not in content:
-                return 0
-            
-            # Client section'ı ayır
-            parts = content.split('Station MAC')
-            if len(parts) < 2:
-                return 0
-            
-            client_section = parts[1]
-            
-            # Satırları say - boş olmayanları
-            lines = client_section.strip().split('\n')
-            count = 0
-            
-            for line in lines[1:]:  # İlk satır header
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                
-                # BSSID kontrolü - 6. sütun
-                parts = line.split(',')
-                if len(parts) >= 6:
-                    line_bssid = parts[5].strip().upper()
-                    if line_bssid == bssid.upper():
-                        count += 1
-            
-            return count
-        except Exception as e:
-            logger.debug(f"Error counting clients: {e}")
+            if 'Station MAC' in content:
+                client_section = content.split('Station MAC')[1] if 'Station MAC' in content else ""
+                # BSSID'yi içeren satırları say
+                count = content.count(bssid)
+                return max(0, count - 1)  # Header'ı çıkar
+            return 0
+        except:
             return 0
     
     def get_ap_by_bssid(self, bssid: str) -> Optional[AccessPoint]:

