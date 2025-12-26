@@ -607,11 +607,13 @@ class NetworkScanner:
             output_file = f"{TEMP_DIR}/deepscan"
             
             # MANUEL KOMUTU TAM TAKLİT ET: airodump-ng --bssid XX --channel YY wlan0
+            # PCAP + CSV desteği eklendi - daha fazla cihaz bulmak için
             cmd = [
                 'airodump-ng',
                 '--bssid', target_bssid_upper,
                 '--channel', str(channel),
-                '-w', output_file,  # CSV çıktısı için
+                '--output-format', 'pcap,csv',  # ✅ PCAP + CSV (frame-level extraction)
+                '-w', output_file,
                 '--write-interval', '2',  # 2 saniyede bir yaz (daha güvenli)
                 self.interface
             ]
@@ -643,8 +645,9 @@ class NetworkScanner:
             
             console.print(f"[green]✓ Derin tarama tamamlandı![/green]\n")
             
-            # CSV dosyasını kontrol et
+            # CSV ve PCAP dosyalarını kontrol et
             csv_file = f"{output_file}-01.csv"
+            pcap_file = f"{output_file}-01.cap"
             
             if not os.path.exists(csv_file):
                 console.print(f"[red]✗ CSV dosyası bulunamadı: {csv_file}[/red]")
@@ -654,57 +657,93 @@ class NetworkScanner:
             csv_size = os.path.getsize(csv_file)
             console.print(f"[dim]🔍 CSV dosya boyutu: {csv_size} bytes[/dim]")
             
+            # PCAP dosyasını kontrol et
+            pcap_exists = os.path.exists(pcap_file)
+            pcap_size = 0
+            if pcap_exists:
+                pcap_size = os.path.getsize(pcap_file)
+                console.print(f"[green]✓ PCAP dosyası bulundu: {pcap_size} bytes[/green]")
+            else:
+                console.print(f"[yellow]⚠️  PCAP dosyası bulunamadı (CSV kullanılacak)[/yellow]")
+            
             if csv_size < 100:
                 console.print(f"[yellow]⚠️  CSV dosyası çok küçük (boş olabilir)[/yellow]")
                 # Yine de parse etmeyi dene
             
             # ═══════════════════════════════════════════════════════════════
-            # CRITICAL FIX: ÖNCE PARSE ET, SONRA TEMİZLE!
+            # CSV PARSING
             # ═══════════════════════════════════════════════════════════════
             
-            # ÖNCE: Bu AP'ye ait TÜM client'ları geçici olarak işaretle
-            clients_before_parse = set(self.clients.keys())
+            clients_before_parse = len(self.clients)
             
-            # CSV'yi ÖZEL parsing ile parse et (sadece client'lar için)
             console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
             console.print(f"[bold cyan]CSV PARSING BAŞLIYOR[/bold cyan]")
             console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
             
             parsed_clients = self._parse_deep_scan_csv(csv_file, target_bssid_upper)
             
+            csv_clients_found = len(self.clients) - clients_before_parse
+            console.print(f"[green]✓ CSV'den {csv_clients_found} yeni client parse edildi[/green]\n")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # PCAP PARSING - Frame-level extraction (daha fazla cihaz bulmak için)
+            # ═══════════════════════════════════════════════════════════════
+            
+            pcap_clients_found = 0
+            if pcap_exists and pcap_size > 0:
+                console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+                console.print(f"[bold cyan]PCAP PARSING (FRAME-LEVEL EXTRACTION)[/bold cyan]")
+                console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+                
+                # Extract clients from PCAP
+                pcap_clients = self.pcap_extractor.extract_clients_from_pcap(pcap_file, target_bssid_upper)
+                
+                # Merge PCAP clients into registry
+                clients_before_pcap = len(self.clients)
+                for client_mac in pcap_clients:
+                    if client_mac not in self.clients:
+                        # New client found in PCAP but not in CSV
+                        pcap_details = self.pcap_extractor.get_client_details(client_mac)
+                        if pcap_details:
+                            client = Client(
+                                mac=client_mac,
+                                bssid=pcap_details.get('bssid', target_bssid_upper),
+                                power=pcap_details.get('power', -100),
+                                packets=pcap_details.get('packets', 0)
+                            )
+                            self.clients[client_mac] = client
+                            console.print(f"[bold green]🆕 PCAP-ONLY CLIENT: {client_mac}[/bold green]")
+                            logger.info(f"PCAP-only client: {client_mac}")
+                    else:
+                        # Client already in registry (from CSV), update packet count
+                        pcap_details = self.pcap_extractor.get_client_details(client_mac)
+                        if pcap_details:
+                            self.clients[client_mac].packets += pcap_details.get('packets', 0)
+                
+                pcap_clients_found = len(self.clients) - clients_before_pcap
+                console.print(f"\n[green]✓ PCAP: {pcap_clients_found} ek client bulundu[/green]\n")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # SONUÇ: Bu AP'ye ait client'ları say (TEMİZLEME YOK!)
+            # get_clients_for_ap() zaten filtreliyor, temizleme gereksiz ve zararlı
+            # ═══════════════════════════════════════════════════════════════
+            
             console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
-            console.print(f"[bold cyan]PARSING SONUÇLARI[/bold cyan]")
-            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
-            console.print(f"[green]✓ CSV'den {len(parsed_clients)} client parse edildi[/green]\n")
-            
-            # SONRA: Bu AP'ye ait OLMAYAN eski client'ları temizle
-            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]")
-            console.print(f"[bold cyan]CLIENT TEMİZLEME İŞLEMİ[/bold cyan]")
+            console.print(f"[bold cyan]TARAMA SONUÇLARI[/bold cyan]")
             console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
             
-            # Bu AP'ye ait client'ları bul
-            clients_for_this_ap = []
-            clients_to_remove = []
+            # Bu AP'ye ait client'ları say (get_clients_for_ap() zaten filtreliyor)
+            clients_for_this_ap = [
+                mac for mac, client in self.clients.items()
+                if client.bssid.upper() == target_bssid_upper
+            ]
             
-            for mac, client in self.clients.items():
-                if client.bssid.upper() == target_bssid_upper:
-                    clients_for_this_ap.append(mac)
-                else:
-                    # Bu AP'ye ait değilse, eski taramadan kalmış olabilir
-                    clients_to_remove.append(mac)
-            
-            # Eski client'ları temizle (sadece bu AP'ye ait olmayanlar)
-            if clients_to_remove:
-                console.print(f"[yellow]🔄 Eski client'lar temizleniyor: {len(clients_to_remove)} adet[/yellow]")
-                for mac in clients_to_remove:
-                    del self.clients[mac]
-                    console.print(f"[dim]  ✗ Silindi: {mac}[/dim]")
-            
-            # Final client sayısı
             final_count = len(clients_for_this_ap)
             
-            console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
-            console.print(f"[bold green]✓ TARAMA TAMAMLANDI: {final_count} cihaz bulundu![/bold green]")
+            console.print(f"[cyan]📊 CSV'den bulunan: {csv_clients_found} client[/cyan]")
+            if pcap_exists:
+                console.print(f"[cyan]📊 PCAP'den bulunan: {pcap_clients_found} ek client[/cyan]")
+            console.print(f"[bold green]✓ TARAMA TAMAMLANDI: {final_count} toplam cihaz bulundu![/bold green]")
             console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
             
             if final_count > 0:
@@ -715,7 +754,10 @@ class NetworkScanner:
                 console.print()
             else:
                 console.print(f"[yellow]⚠️  Hiç cihaz bulunamadı![/yellow]")
-                console.print(f"[yellow]💡 Manuel kontrol için: cat {csv_file}[/yellow]\n")
+                console.print(f"[yellow]💡 Manuel kontrol için: cat {csv_file}[/yellow]")
+                if pcap_exists:
+                    console.print(f"[yellow]💡 PCAP kontrol için: tcpdump -r {pcap_file}[/yellow]")
+                console.print()
             
             return final_count > 0
             
