@@ -432,7 +432,7 @@ class NetworkScanner:
             console.print(f"\n[bold yellow]🔍 DERİN TARAMA BAŞLATILIYOR...[/bold yellow]")
             console.print(f"[cyan]📡 Hedef: {bssid}[/cyan]")
             console.print(f"[cyan]📻 Kanal: {channel}[/cyan]")
-            console.print(f"[cyan]⏱️  Süre: {duration} saniye[/cyan]")
+            console.print(f"[cyan]⏱️  Süre: {duration} saniye ({duration//60} dakika)[/cyan]")
             console.print(f"[dim]💡 Bu tarama seçilen ağdaki TÜM cihazları bulacak...[/dim]\n")
             
             # Clean up old scan files

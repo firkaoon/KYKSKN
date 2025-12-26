@@ -208,15 +208,81 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
         return [], False
 
 
-def confirm_attack(target_count: int, ap_name: str) -> bool:
+def select_attack_mode():
+    """Select attack mode"""
+    from config.settings import ATTACK_MODES
+    from rich.panel import Panel
+    
+    console.print("\n[bold cyan]═══ SALDIRI MODU SEÇİMİ ═══[/bold cyan]\n")
+    
+    # Create choices with detailed info
+    choices = []
+    mode_keys = []
+    
+    for key, mode in ATTACK_MODES.items():
+        risk_color = mode['color']
+        risk_text = f"[{risk_color}]Risk: {mode['risk_level']}[/{risk_color}]"
+        
+        choice_text = f"{mode['name']}\n   {mode['description']}\n   {risk_text}"
+        choices.append(choice_text)
+        mode_keys.append(key)
+    
+    # Show info panel
+    info_panel = Panel(
+        "[yellow]⚠️  UYARI:[/yellow]\n"
+        "• [green]Düşük riskli modlar[/green] daha az fark edilir\n"
+        "• [yellow]Orta riskli modlar[/yellow] dengeli performans sağlar\n"
+        "• [red]Yüksek riskli modlar[/red] agresif ama fark edilebilir\n"
+        "• [bright_yellow]Rastgele mod[/bright_yellow] en iyi gizlilik sağlar (ÖNERİLEN)",
+        title="💡 Mod Seçimi Bilgilendirme",
+        border_style="cyan"
+    )
+    console.print(info_panel)
+    console.print()
+    
+    # Get selection
+    try:
+        choice = questionary.select(
+            "Saldırı modunu seçin:",
+            choices=choices,
+            style=questionary.Style([
+                ('selected', 'fg:cyan bold'),
+                ('pointer', 'fg:cyan bold'),
+                ('highlighted', 'fg:cyan'),
+            ])
+        ).ask()
+        
+        if choice:
+            # Find selected mode
+            idx = choices.index(choice)
+            selected_key = mode_keys[idx]
+            selected_mode = ATTACK_MODES[selected_key]
+            
+            console.print(f"\n[green]✓ Seçilen mod: {selected_mode['name']}[/green]")
+            console.print(f"[dim]Risk seviyesi: {selected_mode['risk_level']}[/dim]\n")
+            
+            return selected_key, selected_mode
+        
+        return None, None
+        
+    except KeyboardInterrupt:
+        console.print("\n[yellow]⚠️  Mod seçimi iptal edildi[/yellow]")
+        return None, None
+
+
+def confirm_attack(target_count: int, ap_name: str, attack_mode: dict) -> bool:
     """Confirm attack start"""
     console.print()
-    console.print(f"[yellow]⚠️  {target_count} cihaza '{ap_name}' ağında saldırı başlatılacak![/yellow]")
+    console.print(f"[yellow]⚠️  SALDIRI ÖZETİ:[/yellow]")
+    console.print(f"   • Hedef Ağ: [cyan]{ap_name}[/cyan]")
+    console.print(f"   • Hedef Cihaz Sayısı: [cyan]{target_count}[/cyan]")
+    console.print(f"   • Saldırı Modu: [{attack_mode['color']}]{attack_mode['name']}[/{attack_mode['color']}]")
+    console.print(f"   • Risk Seviyesi: [{attack_mode['color']}]{attack_mode['risk_level']}[/{attack_mode['color']}]")
     console.print()
     
     try:
         result = questionary.confirm(
-            "Devam etmek istiyor musunuz?",
+            "Saldırıyı başlatmak istiyor musunuz?",
             default=False
         ).ask()
         

