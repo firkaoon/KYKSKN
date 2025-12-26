@@ -224,15 +224,26 @@ class NetworkScanner:
                     
                     # Parse lines after header - TÜM SATIRLARI PARSE ET
                     parsed_clients = 0
+                    total_lines = 0
+                    console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+                    console.print(f"[bold cyan]PARSING CLIENT LINES - STARTING...[/bold cyan]")
+                    console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+                    
                     for line in client_lines[header_idx + 1:]:
                         line = line.strip()
                         if line and not line.startswith('#'):
+                            total_lines += 1
+                            console.print(f"\n[bold yellow]>>> PARSING LINE {total_lines}:[/bold yellow]")
                             before_count = len(self.clients)
                             self._parse_client_line(line)
                             if len(self.clients) > before_count:
                                 parsed_clients += 1
                     
-                    console.print(f"[dim]🔍 DEBUG: {parsed_clients} yeni client parse edildi, toplam: {len(self.clients)}[/dim]")
+                    console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
+                    console.print(f"[bold cyan]PARSING COMPLETE![/bold cyan]")
+                    console.print(f"[bold green]✓ {parsed_clients} new clients parsed from {total_lines} lines[/bold green]")
+                    console.print(f"[bold green]✓ Total clients in database: {len(self.clients)}[/bold green]")
+                    console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
             else:
                 console.print(f"[yellow]⚠️  Client section bulunamadı (sadece 1 bölüm var)[/yellow]")
             
@@ -320,7 +331,7 @@ class NetworkScanner:
             logger.debug(f"Line content: {line[:100]}")
     
     def _parse_client_line(self, line: str):
-        """Parse client line from CSV - İYİLEŞTİRİLMİŞ VERSİYON"""
+        """Parse client line from CSV - ULTRA DEBUG VERSİYON"""
         try:
             # CSV parsing - tırnak içindeki alanları dikkate al
             import csv as csv_module
@@ -332,26 +343,48 @@ class NetworkScanner:
                 # Fallback: basit split
                 parts = [p.strip() for p in line.split(',')]
             
+            # ULTRA DEBUG - Her satırı göster
+            console.print(f"[yellow]🔍 RAW LINE: {line[:150]}...[/yellow]")
+            console.print(f"[yellow]🔍 PARTS COUNT: {len(parts)}[/yellow]")
+            if len(parts) > 0:
+                console.print(f"[yellow]🔍 PARTS[0] (MAC): '{parts[0]}'[/yellow]")
+            if len(parts) > 5:
+                console.print(f"[yellow]🔍 PARTS[5] (BSSID?): '{parts[5]}'[/yellow]")
+            if len(parts) > 6:
+                console.print(f"[yellow]🔍 PARTS[6]: '{parts[6]}'[/yellow]")
+            
             if len(parts) < 6:
+                console.print(f"[red]✗ Line too short: {len(parts)} parts[/red]")
                 logger.debug(f"Client line too short: {len(parts)} parts")
                 return
             
             client_mac = parts[0].strip()
+            console.print(f"[cyan]🔍 Checking MAC: '{client_mac}'[/cyan]")
+            
             if not client_mac or not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                console.print(f"[red]✗ Invalid MAC format: '{client_mac}'[/red]")
                 return
             
-            # BSSID - Farklı kolonları dene (airodump-ng versiyonuna göre değişebilir)
+            console.print(f"[green]✓ Valid MAC: {client_mac}[/green]")
+            
+            # BSSID - TÜM KOLONLARI TARA!
             bssid = None
-            for idx in [5, 6, 7]:  # Farklı kolonları dene
-                if idx < len(parts):
-                    potential_bssid = parts[idx].strip()
-                    if potential_bssid and potential_bssid != '(not associated)':
-                        if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', potential_bssid):
+            console.print(f"[cyan]🔍 Searching for BSSID in {len(parts)} columns...[/cyan]")
+            
+            for idx in range(len(parts)):
+                potential_bssid = parts[idx].strip()
+                console.print(f"[dim]  Column {idx}: '{potential_bssid}'[/dim]")
+                
+                if potential_bssid and potential_bssid != '(not associated)':
+                    if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', potential_bssid):
+                        # Bu bir MAC adresi - ama client MAC'i mi yoksa BSSID mi?
+                        if potential_bssid.upper() != client_mac.upper():
                             bssid = potential_bssid
+                            console.print(f"[bold green]✓✓ BSSID FOUND at column {idx}: {bssid}[/bold green]")
                             break
             
             if not bssid:
-                # BSSID bulunamadı - skip et
+                console.print(f"[red]✗ BSSID NOT FOUND for client {client_mac}[/red]")
                 logger.debug(f"Client {client_mac} has no valid BSSID")
                 return
             
@@ -367,6 +400,8 @@ class NetworkScanner:
                     packets = int(packets_str) if packets_str.isdigit() else 0
             except:
                 pass
+            
+            console.print(f"[cyan]📊 Power: {power} dBm, Packets: {packets}[/cyan]")
             
             # Client oluştur
             client = Client(
@@ -385,23 +420,32 @@ class NetworkScanner:
                 # BSSID değişmişse güncelle
                 if bssid.upper() != existing.bssid.upper():
                     existing.bssid = bssid.upper()
+                console.print(f"[yellow]⟳ Client updated: {client_mac} -> {bssid}[/yellow]")
             else:
                 # Yeni client ekle
                 self.clients[client_mac.upper()] = client
-                console.print(f"[green]✓ Client added: {client_mac} -> {bssid}[/green]")
+                console.print(f"[bold green]✓✓✓ NEW CLIENT ADDED: {client_mac} -> {bssid}[/bold green]")
                 logger.info(f"✓ Client added: {client_mac} -> {bssid}")
             
             # AP'ye bağla
             if bssid.upper() in self.access_points:
                 if client_mac.upper() not in self.access_points[bssid.upper()].clients:
                     self.access_points[bssid.upper()].clients.append(client_mac.upper())
+                    console.print(f"[green]✓ Client linked to AP: {client_mac} -> {bssid}[/green]")
                     logger.info(f"✓ Client linked to AP: {client_mac} -> {bssid}")
             else:
+                console.print(f"[red]⚠️  AP NOT FOUND: {bssid}[/red]")
+                console.print(f"[yellow]Available APs: {list(self.access_points.keys())}[/yellow]")
                 logger.debug(f"AP not found for client: {bssid}")
+            
+            console.print(f"[dim]{'─' * 80}[/dim]")
                     
         except Exception as e:
+            console.print(f"[red]✗✗✗ EXCEPTION: {e}[/red]")
             logger.debug(f"Error parsing client line: {e}")
             logger.debug(f"Line content: {line[:100]}")
+            import traceback
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
     
     def get_sorted_aps(self) -> List[AccessPoint]:
         """Get access points sorted by signal strength"""
