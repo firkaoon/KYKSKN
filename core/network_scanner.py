@@ -19,7 +19,7 @@ import signal
 from typing import List, Dict, Optional, Set
 from dataclasses import dataclass, field
 from rich.console import Console
-from scapy.all import rdpcap, Dot11, Dot11Beacon, Dot11ProbeReq, Dot11ProbeResp, Dot11AssoReq, Dot11AssoResp, Dot11Auth, Dot11Deauth, Dot11Disassoc
+from scapy.all import rdpcap, Dot11, Dot11Beacon, Dot11ProbeReq, Dot11ProbeResp, Dot11AssoReq, Dot11AssoResp, Dot11Auth, Dot11Deauth, Dot11Disas
 from utils.helpers import run_command, cleanup_temp_files
 from utils.logger import logger
 from config.settings import SCAN_TIMEOUT, TEMP_DIR
@@ -70,6 +70,9 @@ class NetworkScanner:
         self.scan_process = None
         self.scan_start_time = None
         
+        # PCAP incremental parsing tracking
+        self._pcap_last_index: Dict[str, int] = {}  # file -> last read index
+        
         # Create temp directory
         os.makedirs(TEMP_DIR, exist_ok=True)
         
@@ -97,7 +100,7 @@ class NetworkScanner:
                 'airodump-ng',
                 '--output-format', 'pcap,csv',  # BOTH formats!
                 '-w', output_file,
-                '--write-interval', '2',  # 2 seconds for better buffering
+                '--write-interval', '5',  # 5 seconds for Realtek stability
             ]
             
             if channel:
@@ -287,7 +290,7 @@ class NetworkScanner:
             return False
     
     def _parse_csv_for_aps(self, csv_file: str):
-        """Parse CSV file for Access Point information"""
+        """Parse CSV file for Access Point information AND client power levels"""
         try:
             with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
@@ -306,8 +309,16 @@ class NetworkScanner:
                     if line.strip():
                         self._parse_ap_line(line)
             
+            # Parse Client section for POWER levels (merge with PCAP clients)
+            if len(sections) > 1:
+                client_lines = sections[1].strip().split('\n')
+                if len(client_lines) > 1:
+                    for line in client_lines[1:]:  # Skip header
+                        if line.strip() and not line.startswith('#'):
+                            self._merge_csv_client_power(line)
+            
         except Exception as e:
-            logger.error(f"Error parsing CSV for APs: {e}")
+            logger.error(f"Error parsing CSV: {e}")
     
     def _parse_ap_line(self, line: str):
         """Parse single AP line from CSV"""
@@ -359,18 +370,49 @@ class NetworkScanner:
         except Exception as e:
             logger.debug(f"Error parsing AP line: {e}")
     
+    def _merge_csv_client_power(self, line: str):
+        """Merge CSV client power level with PCAP-discovered clients"""
+        try:
+            import csv as csv_module
+            reader = csv_module.reader([line])
+            parts = next(reader)
+            parts = [p.strip() for p in parts]
+            
+            if len(parts) < 6:
+                return
+            
+            client_mac = parts[0].strip().upper()
+            bssid = parts[5].strip().upper()
+            
+            # Validate MAC format
+            if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                return
+            
+            if bssid == '(NOT ASSOCIATED)':
+                return
+            
+            # Extract power
+            power_str = parts[3].strip()
+            power = int(power_str) if power_str.lstrip('-').isdigit() else -100
+            
+            # Merge with existing client (from PCAP)
+            if client_mac in self.clients:
+                client = self.clients[client_mac]
+                # Update power if CSV has better value
+                if power > -100 and power > client.power:
+                    client.power = power
+            
+        except Exception as e:
+            logger.debug(f"Error merging CSV client power: {e}")
+    
     def _extract_clients_from_pcap(self, pcap_file: str, verbose: bool = False):
         """
-        PCAP-BASED CLIENT EXTRACTION - The core fix!
+        PCAP-BASED CLIENT EXTRACTION - INCREMENTAL + DETERMINISTIC
         
-        Analyzes ALL frames in PCAP to extract client MAC addresses from:
-        - wlan.sa (source address)
-        - wlan.da (destination address)
-        - Association requests/responses
-        - Authentication frames
-        - Data frames
-        
-        This catches clients that CSV misses due to timing/buffering issues.
+        CRITICAL FIXES:
+        1. Incremental parsing (only new packets)
+        2. Deterministic AP selection (most common BSSID)
+        3. Strict ToDS/FromDS validation for all frame types
         """
         try:
             if verbose:
@@ -378,28 +420,40 @@ class NetworkScanner:
             
             # Read PCAP with scapy
             try:
-                packets = rdpcap(pcap_file)
+                all_packets = rdpcap(pcap_file)
             except Exception as e:
                 logger.error(f"Failed to read PCAP: {e}")
                 return
             
-            if verbose:
-                console.print(f"[cyan]📦 Analyzing {len(packets)} packets...[/cyan]")
+            # INCREMENTAL PARSING - only process new packets
+            last_index = self._pcap_last_index.get(pcap_file, 0)
+            packets = all_packets[last_index:]
+            self._pcap_last_index[pcap_file] = len(all_packets)
             
-            # Track unique client MACs and their associated BSSIDs
-            client_associations: Dict[str, Set[str]] = {}  # client_mac -> set of BSSIDs
+            if len(packets) == 0:
+                return
+            
+            if verbose:
+                console.print(f"[cyan]📦 Analyzing {len(packets)} NEW packets (total: {len(all_packets)})...[/cyan]")
+            
+            # Track client->BSSID associations with COUNT (for deterministic selection)
+            from collections import Counter
+            client_associations: Dict[str, List[str]] = {}  # client_mac -> list of BSSIDs
             ap_bssids: Set[str] = set()
             
-            # First pass: Identify all AP BSSIDs (from beacons)
+            # First pass: Identify all AP BSSIDs (from beacons + existing registry)
             for pkt in packets:
                 if pkt.haslayer(Dot11Beacon):
                     bssid = pkt[Dot11].addr3.upper()
                     ap_bssids.add(bssid)
             
-            if verbose:
-                console.print(f"[dim]📡 Identified {len(ap_bssids)} APs from beacons[/dim]")
+            # Add known APs from registry
+            ap_bssids.update(self.access_points.keys())
             
-            # Second pass: Extract client MACs from ALL frame types
+            if verbose:
+                console.print(f"[dim]📡 Known APs: {len(ap_bssids)}[/dim]")
+            
+            # Second pass: Extract client MACs with STRICT validation
             clients_found = 0
             
             for pkt in packets:
@@ -419,36 +473,41 @@ class NetworkScanner:
                 if addr2 and (addr2.startswith('FF:FF') or addr2.startswith('01:00')):
                     addr2 = None
                 
-                # Determine client and AP based on frame type
+                # Determine client and AP based on frame type + ToDS/FromDS
                 client_mac = None
                 ap_bssid = None
                 
-                # Association Request: addr1=AP, addr2=client, addr3=AP
+                # Association Request: addr1=AP, addr2=client, addr3=BSSID
                 if pkt.haslayer(Dot11AssoReq):
+                    ap_bssid = addr3 if addr3 else addr1
                     client_mac = addr2
-                    ap_bssid = addr1
                 
-                # Association Response: addr1=client, addr2=AP, addr3=AP
+                # Association Response: addr1=client, addr2=AP, addr3=BSSID
                 elif pkt.haslayer(Dot11AssoResp):
+                    ap_bssid = addr3 if addr3 else addr2
                     client_mac = addr1
-                    ap_bssid = addr2
                 
-                # Authentication: addr1 or addr2 could be client
+                # Authentication: addr3=BSSID always
                 elif pkt.haslayer(Dot11Auth):
-                    # addr1=receiver, addr2=transmitter, addr3=BSSID
                     ap_bssid = addr3
                     # Client is the non-AP address
-                    if addr1 and addr1 in ap_bssids:
-                        client_mac = addr2
-                    elif addr2 and addr2 in ap_bssids:
+                    if addr1 and addr1 not in ap_bssids:
                         client_mac = addr1
-                    else:
-                        # Guess: addr2 is usually client in auth frames
+                    elif addr2 and addr2 not in ap_bssids:
                         client_mac = addr2
-                        if not ap_bssid:
-                            ap_bssid = addr1
                 
-                # Data frames: ToDS=1 means client->AP, FromDS=1 means AP->client
+                # Probe Request: addr3=BSSID (if not broadcast)
+                elif pkt.haslayer(Dot11ProbeReq):
+                    if addr3 and addr3 != 'FF:FF:FF:FF:FF:FF':
+                        ap_bssid = addr3
+                        client_mac = addr2
+                
+                # Probe Response: addr3=BSSID
+                elif pkt.haslayer(Dot11ProbeResp):
+                    ap_bssid = addr3
+                    client_mac = addr1
+                
+                # Data frames: STRICT ToDS/FromDS analysis
                 elif dot11.type == 2:  # Data frame
                     to_ds = (dot11.FCfield & 0x1) != 0
                     from_ds = (dot11.FCfield & 0x2) != 0
@@ -462,14 +521,14 @@ class NetworkScanner:
                         client_mac = addr1
                         ap_bssid = addr2
                     elif to_ds and from_ds:
-                        # WDS (ignore for now)
-                        pass
+                        # WDS - skip
+                        continue
                     else:
-                        # Ad-hoc (ignore)
-                        pass
+                        # Ad-hoc - skip
+                        continue
                 
-                # Deauth/Disassoc: addr1=destination, addr2=source, addr3=BSSID
-                elif pkt.haslayer(Dot11Deauth) or pkt.haslayer(Dot11Disassoc):
+                # Deauth/Disassoc: addr3=BSSID
+                elif pkt.haslayer(Dot11Deauth) or pkt.haslayer(Dot11Disas):
                     ap_bssid = addr3
                     # Client is the non-AP address
                     if addr1 and addr1 not in ap_bssids:
@@ -477,7 +536,7 @@ class NetworkScanner:
                     elif addr2 and addr2 not in ap_bssids:
                         client_mac = addr2
                 
-                # Validate and store
+                # CRITICAL VALIDATION: AP must be in known AP set
                 if client_mac and ap_bssid:
                     # Validate MAC format
                     if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
@@ -485,46 +544,55 @@ class NetworkScanner:
                     if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', ap_bssid):
                         continue
                     
-                    # Skip if client MAC is actually an AP
+                    # STRICT: AP must be in known AP set
+                    if ap_bssid not in ap_bssids:
+                        continue
+                    
+                    # STRICT: Client MAC must NOT be an AP
                     if client_mac in ap_bssids:
                         continue
                     
-                    # Store association
+                    # Store association (as LIST for Counter)
                     if client_mac not in client_associations:
-                        client_associations[client_mac] = set()
-                    client_associations[client_mac].add(ap_bssid)
+                        client_associations[client_mac] = []
+                    client_associations[client_mac].append(ap_bssid)
             
-            # Add clients to registry
-            for client_mac, bssid_set in client_associations.items():
-                # Use the most common BSSID (or first one)
-                ap_bssid = list(bssid_set)[0]
+            # Add clients to registry with DETERMINISTIC AP selection
+            from collections import Counter
+            
+            for client_mac, bssid_list in client_associations.items():
+                # DETERMINISTIC: Select most common BSSID (not random)
+                ap_bssid = Counter(bssid_list).most_common(1)[0][0]
                 
                 # Add or update client
                 if client_mac in self.clients:
-                    # Update existing
+                    # Update existing - merge with CSV power if available
                     client = self.clients[client_mac]
-                    client.packets += 1
+                    client.packets += len(bssid_list)
                     client.last_seen = time.time()
-                    # Update BSSID if changed
+                    # Update BSSID only if more frames seen with new AP
                     if ap_bssid != client.bssid:
-                        client.bssid = ap_bssid
+                        old_count = bssid_list.count(client.bssid)
+                        new_count = bssid_list.count(ap_bssid)
+                        if new_count > old_count:
+                            client.bssid = ap_bssid
                 else:
-                    # Create new client
+                    # Create new client (power will be merged from CSV later)
                     client = Client(
                         mac=client_mac,
                         bssid=ap_bssid,
-                        power=-70,  # Default (PCAP doesn't have signal strength)
-                        packets=1
+                        power=-100,  # Will be updated from CSV if available
+                        packets=len(bssid_list)
                     )
                     self.clients[client_mac] = client
                     self.all_time_clients.add(client_mac)
                     clients_found += 1
                     
                     if verbose:
-                        console.print(f"[bold green]✓ NEW CLIENT from PCAP: {client_mac} -> {ap_bssid}[/bold green]")
+                        console.print(f"[bold green]✓ NEW CLIENT: {client_mac} -> {ap_bssid} ({len(bssid_list)} frames)[/bold green]")
             
             if verbose and clients_found > 0:
-                console.print(f"[bold green]🎉 Discovered {clients_found} new clients from PCAP analysis![/bold green]")
+                console.print(f"[bold green]🎉 {clients_found} new clients from PCAP![/bold green]")
             
         except Exception as e:
             logger.error(f"Error extracting clients from PCAP: {e}")
@@ -597,7 +665,7 @@ class NetworkScanner:
                 '--channel', str(channel),
                 '--output-format', 'pcap,csv',
                 '-w', output_file,
-                '--write-interval', '2',
+                '--write-interval', '5',  # 5 seconds for Realtek stability
                 self.interface
             ]
             
