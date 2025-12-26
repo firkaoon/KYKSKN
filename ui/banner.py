@@ -6,7 +6,6 @@ import pyfiglet
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
-from rich.align import Align
 from config.settings import APP_NAME, APP_VERSION, APP_DESCRIPTION
 
 console = Console()
@@ -14,37 +13,37 @@ console = Console()
 
 def show_banner():
     """Display KYKSKN banner with enhanced visual effects"""
-    # Generate ASCII art with multiple font options
+    # Generate ASCII art
     ascii_art = pyfiglet.figlet_format(APP_NAME, font='slant')
     
-    # Create animated gradient effect for ASCII art
+    # Create banner text
     banner_text = Text()
     
-    # ASCII art with gradient effect (cyan to magenta)
+    # ASCII art with gradient effect
     colors = ["cyan", "bright_cyan", "blue", "bright_blue", "magenta", "bright_magenta"]
     lines = ascii_art.split('\n')
     for i, line in enumerate(lines):
         if line.strip():
             color_index = (i // 2) % len(colors)
-            banner_text.append(line + '\n', style=f"bold {colors[color_index]}")
+            color_name = colors[color_index]
+            # Rich style string formatı - güvenli şekilde
+            banner_text.append(line + '\n', style=f"bold {color_name}")
     
-    # Add spacing
     banner_text.append("\n", style="")
     
-    # "Created by Firkaoon" with special effects
+    # "Created by Firkaoon" with gradient
     creator_text = Text()
     creator_text.append("╔" + "═" * 48 + "╗\n", style="bright_cyan")
     creator_text.append("║", style="bright_cyan")
     creator_text.append(" " * 10, style="")
     
-    # Animated gradient for creator name
     creator_name = "Created by Firkaoon"
     gradient_colors = ["cyan", "bright_cyan", "blue", "bright_blue", "magenta", "bright_magenta", "yellow", "bright_yellow"]
     for idx, char in enumerate(creator_name):
-        color = gradient_colors[idx % len(gradient_colors)]
         if char == ' ':
             creator_text.append(char, style="")
         else:
+            color = gradient_colors[idx % len(gradient_colors)]
             creator_text.append(char, style=f"bold {color}")
     
     creator_text.append(" " * 10, style="")
@@ -52,13 +51,11 @@ def show_banner():
     creator_text.append("╚" + "═" * 48 + "╝\n", style="bright_cyan")
     
     banner_text.append(creator_text)
-    
-    # Version info with subtle style
     banner_text.append(f"\n{' ' * 15}Version {APP_VERSION} - 2025\n", style="dim white")
     
-    # Display in enhanced panel with double border
+    # Panel oluştur (Align.center kullanmadan - Rich'in kendi merkezleme özelliği var)
     panel = Panel(
-        Align.center(banner_text),
+        banner_text,
         border_style="bright_cyan",
         box="double",
         padding=(2, 4),
@@ -67,7 +64,7 @@ def show_banner():
     )
     
     console.print()
-    console.print(Align.center(panel))
+    console.print(panel)
     console.print()
 
 
@@ -96,19 +93,20 @@ def show_section_header(title: str, subtitle: str = ""):
     """Display section header with enhanced visual effects"""
     # Create decorative header
     header_text = Text()
-    header_text.append("╔" + "═" * (len(title) + 8) + "╗\n", style="bright_cyan")
+    header_length = len(title) + 8
+    header_text.append("╔" + "═" * header_length + "╗\n", style="bright_cyan")
     header_text.append("║", style="bright_cyan")
     header_text.append(" " * 3, style="")
     header_text.append(f"✨ {title} ✨", style="bold bright_yellow")
     header_text.append(" " * 3, style="")
     header_text.append("║\n", style="bright_cyan")
-    header_text.append("╚" + "═" * (len(title) + 8) + "╝\n", style="bright_cyan")
+    header_text.append("╚" + "═" * header_length + "╝\n", style="bright_cyan")
     
     if subtitle:
         header_text.append(f"\n{subtitle}\n", style="dim white")
     
     console.print()
-    console.print(Align.center(header_text))
+    console.print(header_text)
     console.print()
 
 

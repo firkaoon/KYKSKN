@@ -12,6 +12,7 @@ from rich.layout import Layout
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.text import Text
+from rich.align import Align
 
 console = Console()
 
@@ -56,7 +57,7 @@ class AttackDashboard:
         header_text.append("║\n", style="bright_cyan")
         header_text.append("╚" + "═" * 50 + "╝", style="bright_cyan")
         
-        return Panel(Align.center(header_text), border_style="bright_cyan", box="double", padding=(1, 2))
+        return Panel(header_text, border_style="bright_cyan", box="double", padding=(1, 2))
     
     def create_stats_panel(self, stats: Dict) -> Panel:
         """Create statistics panel with enhanced visual effects"""
@@ -99,7 +100,7 @@ class AttackDashboard:
         
         stats_text.append("╚" + "═" * 30 + "╝", style="bright_green")
         
-        return Panel(Align.center(stats_text), border_style="bright_green", box="double", padding=(1, 2))
+        return Panel(stats_text, border_style="bright_green", box="double", padding=(1, 2))
     
     def create_targets_table(self, targets: List[Dict]) -> Table:
         """Create targets status table with enhanced styling"""
@@ -175,7 +176,7 @@ class AttackDashboard:
         controls_text.append("║\n", style="bright_yellow")
         controls_text.append("╚" + "═" * 40 + "╝", style="bright_yellow")
         
-        return Panel(Align.center(controls_text), border_style="bright_yellow", box="double", padding=(1, 2))
+        return Panel(controls_text, border_style="bright_yellow", box="double", padding=(1, 2))
     
     def generate_layout(self, stats: Dict, targets: List[Dict]) -> Layout:
         """Generate complete dashboard layout"""
@@ -252,7 +253,7 @@ def show_attack_summary(stats: Dict, targets: List[Dict]):
     summary_header.append(" " * 12, style="")
     summary_header.append("║\n", style="bright_cyan")
     summary_header.append("╚" + "═" * 50 + "╝\n", style="bright_cyan")
-    console.print(Align.center(summary_header))
+    console.print(summary_header)
     console.print()
     
     # Summary table
