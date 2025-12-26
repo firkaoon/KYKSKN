@@ -6,7 +6,6 @@ import questionary
 from typing import List, Optional, Tuple
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
 from core.network_scanner import AccessPoint, Client
 from utils.helpers import format_signal_strength
 
@@ -48,14 +47,8 @@ def select_network(aps: List[AccessPoint], current_network: Optional[str] = None
         console.print("[red]✗ Ağ bulunamadı![/red]")
         return None
     
-    # Create table with enhanced visuals
-    table = Table(
-        title="[bold bright_cyan]📡 Erişilebilir Ağlar[/bold bright_cyan]",
-        show_header=True,
-        header_style="bold bright_cyan",
-        border_style="bright_cyan",
-        box="double"
-    )
+    # Create table
+    table = Table(title="📡 Erişilebilir Ağlar", show_header=True, header_style="bold cyan")
     table.add_column("#", style="cyan", width=4)
     table.add_column("SSID", style="white", width=25)
     table.add_column("BSSID", style="dim white", width=20)
@@ -114,14 +107,8 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
         console.print("[red]✗ Bağlı cihaz bulunamadı![/red]")
         return [], False
     
-    # Create table with enhanced visuals
-    table = Table(
-        title="[bold bright_cyan]📱 Bağlı Cihazlar[/bold bright_cyan]",
-        show_header=True,
-        header_style="bold bright_cyan",
-        border_style="bright_cyan",
-        box="double"
-    )
+    # Create table
+    table = Table(title="📱 Bağlı Cihazlar", show_header=True, header_style="bold cyan")
     table.add_column("MAC Adresi", style="white", width=20)
     table.add_column("Sinyal", style="green", width=15)
     table.add_column("Paket", style="yellow", width=10)
@@ -158,19 +145,10 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
     
     console.print(table)
     console.print()
-    
-    # Enhanced whitelist info panel
-    whitelist_panel = Panel(
-        "[bold yellow]⚠️  WHITELIST SİSTEMİ[/bold yellow]\n\n"
-        "[yellow]•[/yellow] Seçtiğiniz cihazlar [bold green]KORUNACAK[/bold green] (saldırı yapılmayacak)\n"
-        "[yellow]•[/yellow] Seçmediğiniz cihazlara [bold red]SALDIRI[/bold red] yapılacak\n"
-        "[yellow]•[/yellow] 'Hepsine Saldır' = Hiç kimseyi koruma",
-        border_style="bright_yellow",
-        box="rounded",
-        padding=(1, 2),
-        title="[bold bright_yellow]💡 Bilgi[/bold bright_yellow]"
-    )
-    console.print(whitelist_panel)
+    console.print("[bold yellow]⚠️  WHITELIST SİSTEMİ:[/bold yellow]")
+    console.print("[yellow]• Seçtiğiniz cihazlar KORUNACAK (saldırı yapılmayacak)[/yellow]")
+    console.print("[yellow]• Seçmediğiniz cihazlara SALDIRI yapılacak[/yellow]")
+    console.print("[yellow]• 'Hepsine Saldır' = Hiç kimseyi koruma[/yellow]")
     console.print()
     
     if not choices:
