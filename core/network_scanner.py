@@ -550,8 +550,8 @@ class NetworkScanner:
                     time.sleep(1)
                     progress.update(task, advance=1)
                     
-                    # Her 3 saniyede bir REAL-TIME parse
-                    if (i + 1) % 3 == 0:
+                    # Her 2 saniyede bir REAL-TIME parse (daha sık kontrol)
+                    if (i + 1) % 2 == 0:
                         temp_csv = f"{output_file}-01.csv"
                         if os.path.exists(temp_csv):
                             # Parse CSV ve yeni client'ları bul
@@ -569,7 +569,8 @@ class NetworkScanner:
             # Stop scan
             self.stop_scan()
             
-            console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]\n")
+            console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]")
+            console.print(f"[bold cyan]📊 REAL-TIME: {len(seen_clients)} cihaz bulundu[/bold cyan]\n")
             
             # Parse results - ÖNCEKİ CLIENT'LARI TEMİZLE!
             old_client_count = len(self.clients)
@@ -582,6 +583,21 @@ class NetworkScanner:
             console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
             
             # Parse new results
+            csv_file = f"{output_file}-01.csv"
+            console.print(f"[dim]🔍 CSV dosyası: {csv_file}[/dim]")
+            
+            # CSV içeriğini göster (debug)
+            if os.path.exists(csv_file):
+                with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                console.print(f"[dim]🔍 CSV boyutu: {len(content)} byte[/dim]")
+                
+                # Client satırlarını say
+                if 'Station MAC' in content:
+                    client_section = content.split('Station MAC')[1] if len(content.split('Station MAC')) > 1 else ""
+                    client_lines = [line for line in client_section.split('\n') if line.strip() and not line.startswith('#')]
+                    console.print(f"[bold yellow]🔍 CSV'de {len(client_lines)-1} client satırı var (header hariç)[/bold yellow]")
+            
             success = self.parse_scan_results(output_file)
             
             if success:

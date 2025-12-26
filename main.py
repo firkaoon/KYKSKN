@@ -207,9 +207,9 @@ class KYKSKN:
         
         time.sleep(1)
         
-        # Derin tarama başlat - 30 SANİYE
-        console.print(f"[bold yellow]⚠️  30 saniyelik DERIN TARAMA - TÜM cihazlar bulunacak![/bold yellow]\n")
-        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=30)
+        # Derin tarama başlat - 60 SANİYE (Tüm cihazları yakalamak için)
+        console.print(f"[bold yellow]⚠️  60 saniyelik DERIN TARAMA - TÜM cihazlar bulunacak![/bold yellow]\n")
+        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=60)
         
         if not deep_scan_success:
             show_error("Derin tarama başarısız!")
