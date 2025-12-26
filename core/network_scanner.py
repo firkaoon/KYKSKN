@@ -578,12 +578,9 @@ class NetworkScanner:
         logger.info(f"Found {len(clients)} clients for {bssid_upper}")
         return clients
     
-    def deep_scan_ap(self, bssid: str, channel: int, duration: int = 30) -> bool:
+    def deep_scan_ap(self, bssid: str, channel: int, duration: int = 60) -> bool:
         """
-        Deep scan for specific AP - finds ALL clients
-        
-        CRITICAL: Uses PCAP + CSV hybrid approach
-        PERSISTENT: Accumulates clients, never resets registry
+        Basit derin tarama - sadece airodump-ng --bssid --channel komutu
         
         Args:
             bssid: Target AP BSSID
@@ -597,22 +594,20 @@ class NetworkScanner:
             console.print(f"\n[bold yellow]🔍 DEEP SCAN STARTING...[/bold yellow]")
             console.print(f"[cyan]📡 Target: {bssid}[/cyan]")
             console.print(f"[cyan]📻 Channel: {channel}[/cyan]")
-            console.print(f"[cyan]⏱️  Duration: {duration} seconds[/cyan]")
-            console.print(f"[dim]💡 This scan will find ALL clients on this network...[/dim]\n")
+            console.print(f"[cyan]⏱️  Duration: {duration} seconds[/cyan]\n")
             
             # Clean up old scan files
             cleanup_temp_files(f"{TEMP_DIR}/deepscan-*")
             
             output_file = f"{TEMP_DIR}/deepscan"
             
-            # Build command - ENABLE PCAP + CSV
+            # BASIT KOMUT: airodump-ng --bssid <BSSID> --channel <CHANNEL> <INTERFACE>
+            # CSV çıktısı için -w parametresi ekliyoruz
             cmd = [
                 'airodump-ng',
-                '--bssid', bssid.upper(),  # Filter to this AP only
-                '--channel', str(channel),  # Lock to this channel
-                '--output-format', 'pcap,csv',  # BOTH formats
-                '-w', output_file,
-                '--write-interval', '2',  # 2 seconds for better buffering
+                '--bssid', bssid.upper(),
+                '--channel', str(channel),
+                '-w', output_file,  # CSV çıktısı için
                 self.interface
             ]
             
@@ -626,74 +621,31 @@ class NetworkScanner:
                 stderr=subprocess.DEVNULL
             )
             
-            # Progress bar
-            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+            # Belirtilen süre kadar bekle
+            console.print(f"[yellow]📡 Tarama yapılıyor... ({duration} saniye)[/yellow]")
+            time.sleep(duration)
             
-            # REAL-TIME MONITORING - Her 3 saniyede CSV'yi parse et ve yeni client'ları göster
-            seen_clients = set()
-            
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[bold blue]{task.description}"),
-                BarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TimeRemainingColumn(),
-                console=console
-            ) as progress:
-                task = progress.add_task(f"[cyan]Cihazlar aranıyor (REAL-TIME)...", total=duration)
-                
-                for i in range(duration):
-                    time.sleep(1)
-                    progress.update(task, advance=1)
-                    
-                    # Her 2 saniyede bir REAL-TIME parse (daha sık kontrol)
-                    if (i + 1) % 2 == 0:
-                        temp_csv = f"{output_file}-01.csv"
-                        if os.path.exists(temp_csv):
-                            # Parse CSV ve yeni client'ları bul
-                            new_clients = self._parse_clients_realtime(temp_csv, bssid.upper(), seen_clients)
-                            
-                            if new_clients:
-                                for client_mac in new_clients:
-                                    progress.console.print(f"[bold green]🆕 YENİ CİHAZ BULUNDU: {client_mac}[/bold green]")
-                                    seen_clients.add(client_mac)
-                            
-                            # Toplam sayıyı göster
-                            total_count = len(seen_clients)
-                            progress.console.print(f"[cyan]📊 {i+1}s: Toplam {total_count} cihaz[/cyan]")
-            
-            # Stop scan
+            # Stop scan gracefully
             self.stop_scan()
             
-            console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]")
-            console.print(f"[bold cyan]📊 REAL-TIME: {len(seen_clients)} cihaz bulundu[/bold cyan]\n")
+            console.print(f"[green]✓ Derin tarama tamamlandı![/green]\n")
             
-            # Parse results - ÖNCEKİ CLIENT'LARI TEMİZLE!
-            old_client_count = len(self.clients)
-            
-            # Sadece bu AP'ye ait client'ları temizle
+            # ÖNCEKİ CLIENT'LARI TEMİZLE (sadece bu AP'ye ait olanlar)
             clients_to_remove = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
             for mac in clients_to_remove:
                 del self.clients[mac]
             
-            console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
+            if clients_to_remove:
+                console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
             
-            # Parse new results
+            # CSV dosyasını parse et
             csv_file = f"{output_file}-01.csv"
-            console.print(f"[dim]🔍 CSV dosyası: {csv_file}[/dim]")
             
-            # CSV içeriğini göster (debug)
-            if os.path.exists(csv_file):
-                with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                console.print(f"[dim]🔍 CSV boyutu: {len(content)} byte[/dim]")
-                
-                # Client satırlarını say
-                if 'Station MAC' in content:
-                    client_section = content.split('Station MAC')[1] if len(content.split('Station MAC')) > 1 else ""
-                    client_lines = [line for line in client_section.split('\n') if line.strip() and not line.startswith('#')]
-                    console.print(f"[bold yellow]🔍 CSV'de {len(client_lines)-1} client satırı var (header hariç)[/bold yellow]")
+            if not os.path.exists(csv_file):
+                console.print(f"[red]✗ CSV dosyası bulunamadı: {csv_file}[/red]")
+                return False
             
+            # CSV'yi parse et
             success = self.parse_scan_results(output_file)
             
             if success:
