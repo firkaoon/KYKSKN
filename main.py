@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-KYKSKN - Advanced Wireless Security Framework
+KYKSKN - Created by Firkaoon
 Main Entry Point
-Created by Firkaoon
 """
 
 import sys
@@ -88,12 +87,7 @@ class KYKSKN:
         
     def check_requirements(self) -> bool:
         """Check system requirements"""
-        header_text = Text()
-        header_text.append("╔═══ ", style="bold bright_cyan")
-        header_text.append("Sistem Kontrolleri", style="bold white")
-        header_text.append(" ═══╗", style="bold bright_cyan")
-        console.print(header_text)
-        console.print()
+        console.print("[cyan]═══ Sistem Kontrolleri ═══[/cyan]\n")
         
         # Check root
         if not is_root():
@@ -346,13 +340,8 @@ class KYKSKN:
         except KeyboardInterrupt:
             console.print("\n[yellow]⚠️  İşlem iptal edildi[/yellow]")
         except Exception as e:
-            # Safe error logging
-            try:
-                error_msg = str(e) if e else "Unknown error"
-            except Exception:
-                error_msg = f"Error type: {type(e).__name__}"
-            logger.error(f"Attack workflow error: {error_msg}")
-            show_error(f"Hata: {error_msg}")
+            logger.error(f"Attack workflow error: {e}")
+            show_error(f"Hata: {e}")
     
     def run(self):
         """Main application loop"""
@@ -409,19 +398,13 @@ class KYKSKN:
         except KeyboardInterrupt:
             console.print("\n\n[yellow]Program sonlandırılıyor...[/yellow]")
         except Exception as e:
-            # Safe error logging - prevent substitute error
             try:
-                if e is None:
-                    error_msg = "Unknown error"
-                elif isinstance(e, str):
-                    error_msg = e
-                else:
-                    error_msg = str(e)
+                error_msg = str(e) if e else "Bilinmeyen hata"
+                logger.critical(f"Fatal error: {error_msg}")
+                show_error(f"Kritik hata: {error_msg}")
             except Exception:
-                error_msg = f"Error type: {type(e).__name__}"
-            
-            logger.critical(f"Fatal error: {error_msg}")
-            show_error(f"Kritik hata: {error_msg}")
+                logger.critical("Fatal error: Unknown exception")
+                show_error("Kritik hata: Bilinmeyen hata oluştu")
         finally:
             # Cleanup
             if self.deauth_engine:

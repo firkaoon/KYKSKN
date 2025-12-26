@@ -32,7 +32,7 @@ class AttackTarget:
 
 
 class DeauthEngine:
-    """Multi-target deauthentication attack engine"""
+    """Deauthentication attack engine - Created by Firkaoon"""
     
     def __init__(self, interface: str):
         self.interface = interface

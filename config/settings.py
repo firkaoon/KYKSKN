@@ -5,7 +5,7 @@ KYKSKN - Configuration Settings
 # Application Info
 APP_NAME = "KYKSKN"
 APP_VERSION = "1.0.0"
-APP_DESCRIPTION = "Advanced Wireless Security Framework"
+APP_DESCRIPTION = "Created by Firkaoon"
 
 # Colors
 COLOR_PRIMARY = "cyan"

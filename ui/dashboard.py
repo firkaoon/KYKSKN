@@ -32,62 +32,45 @@ class AttackDashboard:
         elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
         
         header_text = Text()
-        header_text.append("╔═══ ", style="bold bright_cyan")
-        header_text.append("🎯 SALDIRI DURUMU", style="bold white")
-        header_text.append(" ═══╗\n", style="bold bright_cyan")
-        header_text.append("║ ", style="bold bright_cyan")
-        header_text.append("Hedef Ağ: ", style="white")
-        header_text.append(f"{self.ap_name}", style="bold bright_yellow")
-        header_text.append(" ║\n", style="bold bright_cyan")
-        header_text.append("║ ", style="bold bright_cyan")
-        header_text.append("BSSID: ", style="dim white")
-        header_text.append(f"{self.ap_bssid}", style="dim white")
-        header_text.append(" ║\n", style="bold bright_cyan")
-        header_text.append("║ ", style="bold bright_cyan")
-        header_text.append("Süre: ", style="white")
+        header_text.append("╔" + "═" * 50 + "╗\n", style="bold bright_cyan")
+        header_text.append("║", style="bold bright_cyan")
+        header_text.append(" " * 12, style="reset")
+        header_text.append("🎯 SALDIRI DURUMU 🎯", style="bold bright_yellow")
+        header_text.append(" " * 12, style="reset")
+        header_text.append("║\n", style="bold bright_cyan")
+        header_text.append("╚" + "═" * 50 + "╝\n", style="bold bright_cyan")
+        header_text.append(f"\n📡 Hedef Ağ: ", style="white")
+        header_text.append(f"{self.ap_name}\n", style="bold bright_yellow")
+        header_text.append(f"🔑 BSSID: ", style="white")
+        header_text.append(f"{self.ap_bssid}\n", style="dim bright_cyan")
+        header_text.append(f"⏱️  Süre: ", style="white")
         header_text.append(f"{elapsed_str}", style="bold bright_green")
-        header_text.append(" ║\n", style="bold bright_cyan")
-        header_text.append("╚", style="bold bright_cyan")
-        header_text.append("═" * 35, style="bold bright_cyan")
-        header_text.append("╝", style="bold bright_cyan")
         
-        return Panel(header_text, border_style="bright_cyan", box="double", padding=(1, 2))
+        return Panel(header_text, border_style="bright_cyan", box=rich.box.ROUNDED, padding=(1, 2))
     
     def create_stats_panel(self, stats: Dict) -> Panel:
         """Create statistics panel with enhanced visuals"""
         stats_text = Text()
         
         # Overall stats with icons
-        stats_text.append("📊 ", style="bold white")
-        stats_text.append("Genel İstatistikler\n\n", style="bold white")
-        
-        stats_text.append("🎯 ", style="bold cyan")
-        stats_text.append("Toplam Hedef: ", style="white")
+        stats_text.append("📊 Genel İstatistikler\n\n", style="bold bright_white")
+        stats_text.append(f"🎯 Toplam Hedef: ", style="white")
         stats_text.append(f"{stats.get('total_targets', 0)}\n", style="bold bright_cyan")
         
-        stats_text.append("⚡ ", style="bold green")
-        stats_text.append("Aktif Saldırı: ", style="white")
+        stats_text.append(f"🔄 Aktif Saldırı: ", style="white")
         stats_text.append(f"{stats.get('active_targets', 0)}\n", style="bold bright_green")
         
-        stats_text.append("✅ ", style="bold yellow")
-        stats_text.append("Başarılı: ", style="white")
+        stats_text.append(f"✅ Başarılı: ", style="white")
         stats_text.append(f"{stats.get('successful_targets', 0)}\n", style="bold bright_yellow")
         
-        stats_text.append("📦 ", style="bold magenta")
-        stats_text.append("Toplam Paket: ", style="white")
+        stats_text.append(f"📦 Toplam Paket: ", style="white")
         stats_text.append(f"{stats.get('total_packets', 0):,}\n", style="bold bright_magenta")
         
-        return Panel(stats_text, title="[bold bright_green]📊 İstatistikler[/bold bright_green]", border_style="bright_green", box="double", padding=(1, 2))
+        return Panel(stats_text, title="[bold bright_cyan]📊 İstatistikler[/bold bright_cyan]", border_style="bright_green", box=rich.box.ROUNDED, padding=(1, 2))
     
     def create_targets_table(self, targets: List[Dict]) -> Table:
         """Create targets status table with enhanced visuals"""
-        table = Table(
-            show_header=True, 
-            header_style="bold bright_cyan", 
-            title="[bold bright_cyan]🎯 Hedef Durumları[/bold bright_cyan]",
-            border_style="bright_cyan",
-            box="double"
-        )
+        table = Table(show_header=True, header_style="bold bright_cyan", title="[bold bright_yellow]🎯 Hedef Durumları[/bold bright_yellow]", box=rich.box.ROUNDED, border_style="bright_cyan")
         
         table.add_column("MAC Adresi", style="white", width=20)
         table.add_column("Durum", style="green", width=20)
@@ -104,13 +87,13 @@ class AttackDashboard:
             # Format elapsed time
             elapsed_str = str(timedelta(seconds=int(elapsed))).split('.')[0]
             
-            # Determine status with enhanced visuals
+            # Determine status
             if successful:
                 status = "✅ Bağlantı kesildi"
-                status_style = "bold bright_green"
+                status_style = "bold green"
             elif is_active:
                 status = "🔄 Saldırı devam ediyor"
-                status_style = "bold bright_yellow"
+                status_style = "bold yellow"
             else:
                 status = "⏸️  Beklemede"
                 status_style = "dim white"
@@ -137,16 +120,15 @@ class AttackDashboard:
     def create_controls_panel(self) -> Panel:
         """Create controls panel with enhanced visuals"""
         controls_text = Text()
-        controls_text.append("⌨️  ", style="bold white")
-        controls_text.append("Kontroller\n\n", style="bold white")
-        controls_text.append("┌─ ", style="dim yellow")
+        controls_text.append("⌨️  Kontroller\n\n", style="bold bright_white")
+        controls_text.append("[", style="dim")
         controls_text.append("Ctrl+C", style="bold bright_yellow")
-        controls_text.append(" ─┐\n", style="dim yellow")
-        controls_text.append("└─ ", style="dim yellow")
-        controls_text.append("Saldırıyı Durdur", style="white")
-        controls_text.append(" ─┘", style="dim yellow")
+        controls_text.append("] ", style="dim")
+        controls_text.append("Saldırıyı Durdur\n", style="white")
+        controls_text.append("\n💡 ", style="dim")
+        controls_text.append("Created by Firkaoon", style="bold bright_magenta")
         
-        return Panel(controls_text, border_style="bright_yellow", box="double", padding=(1, 2))
+        return Panel(controls_text, border_style="bright_yellow", box=rich.box.ROUNDED, padding=(1, 2))
     
     def generate_layout(self, stats: Dict, targets: List[Dict]) -> Layout:
         """Generate complete dashboard layout"""
@@ -215,17 +197,14 @@ class AttackDashboard:
 def show_attack_summary(stats: Dict, targets: List[Dict]):
     """Show attack summary after completion with enhanced visuals"""
     console.print("\n")
-    summary_header = Text()
-    summary_header.append("╔═══ ", style="bold bright_cyan")
-    summary_header.append("SALDIRI ÖZETİ", style="bold white")
-    summary_header.append(" ═══╗", style="bold bright_cyan")
-    console.print(summary_header)
-    console.print()
+    console.print("[bold bright_cyan]╔" + "═" * 48 + "╗[/bold bright_cyan]")
+    console.print("[bold bright_cyan]║[/bold bright_cyan]" + " " * 12 + "[bold bright_yellow]📊 SALDIRI ÖZETİ 📊[/bold bright_yellow]" + " " * 12 + "[bold bright_cyan]║[/bold bright_cyan]")
+    console.print("[bold bright_cyan]╚" + "═" * 48 + "╝[/bold bright_cyan]\n")
     
     # Summary table with enhanced visuals
-    table = Table(show_header=False, box="double", border_style="bright_cyan")
-    table.add_column("Metric", style="bold white", width=25)
-    table.add_column("Value", style="bold bright_cyan")
+    table = Table(show_header=True, header_style="bold bright_cyan", box=rich.box.ROUNDED, border_style="bright_cyan")
+    table.add_column("📊 Metrik", style="bold white", width=30)
+    table.add_column("💯 Değer", style="bold bright_cyan", width=20)
     
     table.add_row("🎯 Toplam Hedef", str(stats.get('total_targets', 0)))
     table.add_row("✅ Başarılı Saldırı", str(stats.get('successful_targets', 0)))
@@ -234,25 +213,19 @@ def show_attack_summary(stats: Dict, targets: List[Dict]):
     console.print(table)
     console.print()
     
-    # Successful targets with enhanced visuals
+    # Successful targets
     successful = [t for t in targets if t.get('successful', False)]
     if successful:
-        success_text = Text()
-        success_text.append("✅ ", style="bold bright_green")
-        success_text.append("Başarılı Hedefler:", style="bold bright_green")
-        console.print(success_text)
+        console.print("[bold green]✅ Başarılı Hedefler:[/bold green]")
         for target in successful:
-            console.print(f"  • [bold white]{target.get('client_mac', 'Unknown')}[/bold white] - [bold cyan]{target.get('packets_sent', 0):,}[/bold cyan] paket")
+            console.print(f"  • {target.get('client_mac', 'Unknown')} - {target.get('packets_sent', 0):,} paket")
         console.print()
     
-    # Failed targets with enhanced visuals
+    # Failed targets
     failed = [t for t in targets if not t.get('successful', False)]
     if failed:
-        failed_text = Text()
-        failed_text.append("⚠️  ", style="bold bright_yellow")
-        failed_text.append("Devam Eden/Başarısız Hedefler:", style="bold bright_yellow")
-        console.print(failed_text)
+        console.print("[bold yellow]⚠️  Devam Eden/Başarısız Hedefler:[/bold yellow]")
         for target in failed:
-            console.print(f"  • [bold white]{target.get('client_mac', 'Unknown')}[/bold white] - [bold cyan]{target.get('packets_sent', 0):,}[/bold cyan] paket")
+            console.print(f"  • {target.get('client_mac', 'Unknown')} - {target.get('packets_sent', 0):,} paket")
         console.print()
 

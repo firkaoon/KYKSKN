@@ -59,41 +59,30 @@ class Logger:
         self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
         
-    def _safe_message(self, message):
-        """Convert message to safe string format - prevents substitute error"""
-        if message is None:
-            return "None"
-        if isinstance(message, str):
-            return message
-        try:
-            return str(message)
-        except Exception:
-            return f"<unprintable object: {type(message).__name__}>"
-    
-    def info(self, message):
+    def info(self, message: str):
         """Log info message"""
         if self.logger:
-            self.logger.info(self._safe_message(message))
+            self.logger.info(message)
     
-    def warning(self, message):
+    def warning(self, message: str):
         """Log warning message"""
         if self.logger:
-            self.logger.warning(self._safe_message(message))
+            self.logger.warning(message)
     
-    def error(self, message):
+    def error(self, message: str):
         """Log error message"""
         if self.logger:
-            self.logger.error(self._safe_message(message))
+            self.logger.error(message)
     
-    def debug(self, message):
+    def debug(self, message: str):
         """Log debug message"""
         if self.logger:
-            self.logger.debug(self._safe_message(message))
+            self.logger.debug(message)
     
-    def critical(self, message):
+    def critical(self, message: str):
         """Log critical message"""
         if self.logger:
-            self.logger.critical(self._safe_message(message))
+            self.logger.critical(message)
 
 
 # Global logger instance

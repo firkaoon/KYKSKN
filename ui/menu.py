@@ -48,20 +48,14 @@ def select_network(aps: List[AccessPoint], current_network: Optional[str] = None
         return None
     
     # Create table with enhanced visuals
-    table = Table(
-        title="[bold bright_cyan]📡 Erişilebilir Ağlar[/bold bright_cyan]", 
-        show_header=True, 
-        header_style="bold bright_cyan",
-        border_style="bright_cyan",
-        box="double"
-    )
-    table.add_column("#", style="bold cyan", width=4)
-    table.add_column("SSID", style="bold white", width=25)
+    table = Table(title="[bold bright_yellow]📡 Erişilebilir Ağlar[/bold bright_yellow]", show_header=True, header_style="bold bright_cyan", box=rich.box.ROUNDED, border_style="bright_cyan")
+    table.add_column("#", style="cyan", width=4)
+    table.add_column("SSID", style="white", width=25)
     table.add_column("BSSID", style="dim white", width=20)
-    table.add_column("Kanal", style="bold yellow", width=8)
-    table.add_column("Sinyal", style="bold green", width=25)
-    table.add_column("Şifreleme", style="bold magenta", width=15)
-    table.add_column("Cihaz", style="bold blue", width=8)
+    table.add_column("Kanal", style="yellow", width=8)
+    table.add_column("Sinyal", style="green", width=25)
+    table.add_column("Şifreleme", style="magenta", width=15)
+    table.add_column("Cihaz", style="blue", width=8)
     
     # Add rows
     choices = []
@@ -114,17 +108,11 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
         return [], False
     
     # Create table with enhanced visuals
-    table = Table(
-        title="[bold bright_cyan]📱 Bağlı Cihazlar[/bold bright_cyan]", 
-        show_header=True, 
-        header_style="bold bright_cyan",
-        border_style="bright_cyan",
-        box="double"
-    )
-    table.add_column("MAC Adresi", style="bold white", width=20)
-    table.add_column("Sinyal", style="bold green", width=15)
-    table.add_column("Paket", style="bold yellow", width=10)
-    table.add_column("Durum", style="bold magenta", width=25)
+    table = Table(title="[bold bright_yellow]📱 Bağlı Cihazlar[/bold bright_yellow]", show_header=True, header_style="bold bright_cyan", box=rich.box.ROUNDED, border_style="bright_cyan")
+    table.add_column("MAC Adresi", style="white", width=20)
+    table.add_column("Sinyal", style="green", width=15)
+    table.add_column("Paket", style="yellow", width=10)
+    table.add_column("Durum", style="magenta", width=25)
     
     # Add rows - TÜM CİHAZLAR choices'a eklenir
     choices = []
@@ -157,20 +145,10 @@ def select_clients(clients: List[Client], user_mac: Optional[str] = None) -> Tup
     
     console.print(table)
     console.print()
-    whitelist_text = Text()
-    whitelist_text.append("╔═══ ", style="bold bright_yellow")
-    whitelist_text.append("⚠️  WHITELIST SİSTEMİ", style="bold bright_yellow")
-    whitelist_text.append(" ═══╗\n", style="bold bright_yellow")
-    whitelist_text.append("║ ", style="bold bright_yellow")
-    whitelist_text.append("• Seçtiğiniz cihazlar KORUNACAK (saldırı yapılmayacak)\n", style="yellow")
-    whitelist_text.append("║ ", style="bold bright_yellow")
-    whitelist_text.append("• Seçmediğiniz cihazlara SALDIRI yapılacak\n", style="yellow")
-    whitelist_text.append("║ ", style="bold bright_yellow")
-    whitelist_text.append("• 'Hepsine Saldır' = Hiç kimseyi koruma\n", style="yellow")
-    whitelist_text.append("╚", style="bold bright_yellow")
-    whitelist_text.append("═" * 45, style="bold bright_yellow")
-    whitelist_text.append("╝", style="bold bright_yellow")
-    console.print(whitelist_text)
+    console.print("[bold yellow]⚠️  WHITELIST SİSTEMİ:[/bold yellow]")
+    console.print("[yellow]• Seçtiğiniz cihazlar KORUNACAK (saldırı yapılmayacak)[/yellow]")
+    console.print("[yellow]• Seçmediğiniz cihazlara SALDIRI yapılacak[/yellow]")
+    console.print("[yellow]• 'Hepsine Saldır' = Hiç kimseyi koruma[/yellow]")
     console.print()
     
     if not choices:

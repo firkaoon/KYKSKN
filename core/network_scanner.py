@@ -125,13 +125,8 @@ class NetworkScanner:
             return self.parse_scan_results(output_file)
             
         except Exception as e:
-            # Safe error logging
-            try:
-                error_msg = str(e) if e else "Unknown error"
-            except Exception:
-                error_msg = f"Error type: {type(e).__name__}"
-            logger.error(f"Error starting scan: {error_msg}")
-            console.print(f"[red]✗ Scan error: {error_msg}[/red]")
+            logger.error(f"Error starting scan: {e}")
+            console.print(f"[red]✗ Scan error: {e}[/red]")
             return False
     
     def stop_scan(self):
@@ -382,13 +377,8 @@ class NetworkScanner:
             return True
             
         except Exception as e:
-            # Safe error logging
-            try:
-                error_msg = str(e) if e else "Unknown error"
-            except Exception:
-                error_msg = f"Error type: {type(e).__name__}"
-            logger.error(f"Error parsing scan results: {error_msg}")
-            console.print(f"[red]✗ CSV parse hatası: {error_msg}[/red]")
+            logger.error(f"Error parsing scan results: {e}")
+            console.print(f"[red]✗ CSV parse hatası: {e}[/red]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
@@ -772,13 +762,8 @@ class NetworkScanner:
             return final_count > 0
             
         except Exception as e:
-            # Safe error logging
-            try:
-                error_msg = str(e) if e else "Unknown error"
-            except Exception:
-                error_msg = f"Error type: {type(e).__name__}"
-            logger.error(f"Deep scan error: {error_msg}")
-            console.print(f"[red]✗ Derin tarama hatası: {error_msg}[/red]")
+            logger.error(f"Deep scan error: {e}")
+            console.print(f"[red]✗ Derin tarama hatası: {e}[/red]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
