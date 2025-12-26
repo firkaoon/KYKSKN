@@ -346,8 +346,13 @@ class KYKSKN:
         except KeyboardInterrupt:
             console.print("\n[yellow]⚠️  İşlem iptal edildi[/yellow]")
         except Exception as e:
-            logger.error(f"Attack workflow error: {e}")
-            show_error(f"Hata: {e}")
+            # Safe error logging
+            try:
+                error_msg = str(e) if e else "Unknown error"
+            except Exception:
+                error_msg = f"Error type: {type(e).__name__}"
+            logger.error(f"Attack workflow error: {error_msg}")
+            show_error(f"Hata: {error_msg}")
     
     def run(self):
         """Main application loop"""
@@ -405,7 +410,16 @@ class KYKSKN:
             console.print("\n\n[yellow]Program sonlandırılıyor...[/yellow]")
         except Exception as e:
             # Safe error logging - prevent substitute error
-            error_msg = str(e) if e else "Unknown error"
+            try:
+                if e is None:
+                    error_msg = "Unknown error"
+                elif isinstance(e, str):
+                    error_msg = e
+                else:
+                    error_msg = str(e)
+            except Exception:
+                error_msg = f"Error type: {type(e).__name__}"
+            
             logger.critical(f"Fatal error: {error_msg}")
             show_error(f"Kritik hata: {error_msg}")
         finally:
