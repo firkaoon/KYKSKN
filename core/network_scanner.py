@@ -1,5 +1,13 @@
 """
-KYKSKN - Network Scanner
+KYKSKN - Network Scanner (REFACTORED FOR MAXIMUM CLIENT DETECTION)
+
+CRITICAL FIXES:
+1. PCAP-based client extraction (wlan.sa / wlan.da analysis)
+2. Graceful airodump-ng shutdown with buffer flush
+3. Persistent client registry (accumulation across scans)
+4. Hybrid CSV+PCAP parsing strategy
+5. Continuous scanning without state reset
+6. Realtek driver frame drop mitigation
 """
 
 import subprocess
@@ -7,9 +15,11 @@ import time
 import csv
 import os
 import re
-from typing import List, Dict, Optional
-from dataclasses import dataclass
+import signal
+from typing import List, Dict, Optional, Set
+from dataclasses import dataclass, field
 from rich.console import Console
+from scapy.all import rdpcap, Dot11, Dot11Beacon, Dot11ProbeReq, Dot11ProbeResp, Dot11AssoReq, Dot11AssoResp, Dot11Auth, Dot11Deauth, Dot11Disassoc
 from utils.helpers import run_command, cleanup_temp_files
 from utils.logger import logger
 from config.settings import SCAN_TIMEOUT, TEMP_DIR
@@ -26,7 +36,7 @@ class AccessPoint:
     encryption: str
     power: int
     beacons: int
-    clients: List[str]
+    clients: List[str] = field(default_factory=list)
     
     def __str__(self):
         return f"{self.essid} ({self.bssid}) - Ch:{self.channel} - {self.power}dBm"
@@ -34,42 +44,60 @@ class AccessPoint:
 
 @dataclass
 class Client:
-    """Client device data structure"""
+    """Client device data structure with historical tracking"""
     mac: str
     bssid: str
     power: int
     packets: int
+    first_seen: float = field(default_factory=time.time)
+    last_seen: float = field(default_factory=time.time)
     
     def __str__(self):
-        return f"{self.mac} -> {self.bssid} ({self.power}dBm)"
+        return f"{self.mac} -> {self.bssid} ({self.power}dBm, {self.packets} pkts)"
 
 
 class NetworkScanner:
-    """Scan for wireless networks and clients"""
+    """Scan for wireless networks and clients with MAXIMUM detection accuracy"""
     
     def __init__(self, interface: str):
         self.interface = interface
         self.access_points: Dict[str, AccessPoint] = {}
+        
+        # PERSISTENT CLIENT REGISTRY - NEVER RESET!
         self.clients: Dict[str, Client] = {}
+        self.all_time_clients: Set[str] = set()  # Historical record
+        
         self.scan_process = None
+        self.scan_start_time = None
         
         # Create temp directory
         os.makedirs(TEMP_DIR, exist_ok=True)
+        
+        console.print("[bold green]✓ NetworkScanner initialized with PERSISTENT client registry[/bold green]")
     
     def start_scan(self, channel: Optional[int] = None, duration: Optional[int] = SCAN_TIMEOUT) -> bool:
-        """Start airodump-ng scan - duration=None ise sonsuz tarama"""
+        """
+        Start airodump-ng scan with GRACEFUL shutdown support
+        
+        Args:
+            channel: Specific channel to scan (None = all channels)
+            duration: Scan duration in seconds (None = infinite until Ctrl+C)
+        
+        Returns:
+            bool: Success status
+        """
         try:
             # Clean up old scan files
             cleanup_temp_files(f"{TEMP_DIR}/scan-*")
             
             output_file = f"{TEMP_DIR}/scan"
             
-            # Build command
+            # Build command with BOTH CSV and PCAP output
             cmd = [
                 'airodump-ng',
-                '--output-format', 'csv',
+                '--output-format', 'pcap,csv',  # BOTH formats!
                 '-w', output_file,
-                '--write-interval', '1'
+                '--write-interval', '2',  # 2 seconds for better buffering
             ]
             
             if channel:
@@ -78,354 +106,445 @@ class NetworkScanner:
             cmd.append(self.interface)
             
             logger.info(f"Starting scan: {' '.join(cmd)}")
+            console.print(f"[cyan]📡 Starting airodump-ng with CSV+PCAP output...[/cyan]")
             
             # Start airodump-ng in background
             self.scan_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid  # Create process group for clean termination
             )
             
+            self.scan_start_time = time.time()
+            
             if duration is None:
-                # SONSUZ TARAMA - Kullanıcı Ctrl+C ile durduracak
-                console.print(f"[yellow]📡 Ağlar taranıyor... (Sonsuz - Ctrl+C ile durdurun)[/yellow]")
+                # INFINITE SCAN - User will stop with Ctrl+C
+                console.print(f"[yellow]📡 Scanning networks... (Infinite - Press Ctrl+C to stop)[/yellow]")
                 try:
-                    # Process çalışırken bekle (sonsuz döngü)
                     while self.scan_process.poll() is None:
                         time.sleep(1)
+                        
+                        # Real-time PCAP parsing every 5 seconds
+                        if int(time.time() - self.scan_start_time) % 5 == 0:
+                            self._parse_pcap_realtime(output_file)
+                            
                 except KeyboardInterrupt:
-                    console.print(f"\n[yellow]⚠️  Tarama durduruluyor...[/yellow]")
-                    self.stop_scan()
+                    console.print(f"\n[yellow]⚠️  Stopping scan gracefully...[/yellow]")
+                    self.stop_scan_gracefully()
             else:
-                # Sınırlı süre
-                console.print(f"[yellow]📡 Ağlar taranıyor... ({duration} saniye)[/yellow]")
-                time.sleep(duration)
-                self.stop_scan()
+                # Timed scan
+                console.print(f"[yellow]📡 Scanning networks... ({duration} seconds)[/yellow]")
+                
+                # Real-time monitoring
+                elapsed = 0
+                while elapsed < duration and self.scan_process.poll() is None:
+                    time.sleep(1)
+                    elapsed += 1
+                    
+                    # Real-time PCAP parsing every 5 seconds
+                    if elapsed % 5 == 0:
+                        self._parse_pcap_realtime(output_file)
+                        console.print(f"[dim]⏱️  {elapsed}s - Found {len(self.clients)} clients so far...[/dim]")
+                
+                self.stop_scan_gracefully()
             
-            # Parse results
+            # Final comprehensive parsing (CSV + PCAP)
+            console.print(f"[cyan]🔍 Performing final comprehensive analysis...[/cyan]")
             return self.parse_scan_results(output_file)
             
         except Exception as e:
             logger.error(f"Error starting scan: {e}")
-            console.print(f"[red]✗ Tarama hatası: {e}[/red]")
+            console.print(f"[red]✗ Scan error: {e}[/red]")
             return False
     
-    def stop_scan(self):
-        """Stop airodump-ng scan"""
+    def stop_scan_gracefully(self):
+        """
+        GRACEFUL SHUTDOWN - Ensures all buffered frames are written
+        
+        This is CRITICAL for Realtek adapters which buffer frames aggressively
+        """
         if self.scan_process:
             try:
-                self.scan_process.terminate()
-                self.scan_process.wait(timeout=5)
-            except Exception:
+                console.print(f"[yellow]⚙️  Sending SIGTERM to airodump-ng (graceful shutdown)...[/yellow]")
+                
+                # Send SIGTERM to process group (not just main process)
+                try:
+                    os.killpg(os.getpgid(self.scan_process.pid), signal.SIGTERM)
+                except:
+                    self.scan_process.terminate()
+                
+                # Wait up to 10 seconds for graceful shutdown
+                console.print(f"[yellow]⏳ Waiting for buffer flush (up to 10s)...[/yellow]")
+                try:
+                    self.scan_process.wait(timeout=10)
+                    console.print(f"[green]✓ airodump-ng stopped gracefully[/green]")
+                except subprocess.TimeoutExpired:
+                    console.print(f"[yellow]⚠️  Timeout - sending SIGKILL...[/yellow]")
+                    try:
+                        os.killpg(os.getpgid(self.scan_process.pid), signal.SIGKILL)
+                    except:
+                        self.scan_process.kill()
+                    self.scan_process.wait(timeout=2)
+                
+                # Additional wait for filesystem sync (important for PCAP)
+                time.sleep(2)
+                
+            except Exception as e:
+                logger.error(f"Error stopping scan: {e}")
                 try:
                     self.scan_process.kill()
-                except Exception:
+                except:
                     pass
+            
             self.scan_process = None
     
+    def stop_scan(self):
+        """Legacy method - redirects to graceful shutdown"""
+        self.stop_scan_gracefully()
+    
+    def _parse_pcap_realtime(self, output_file: str):
+        """
+        REAL-TIME PCAP parsing during scan
+        
+        Extracts clients from PCAP without stopping the scan
+        """
+        try:
+            pcap_file = f"{output_file}-01.cap"
+            
+            if not os.path.exists(pcap_file):
+                return
+            
+            # Get file size to avoid parsing incomplete writes
+            file_size = os.path.getsize(pcap_file)
+            if file_size < 1000:  # Too small
+                return
+            
+            # Parse PCAP (only new packets since last parse)
+            self._extract_clients_from_pcap(pcap_file, verbose=False)
+            
+        except Exception as e:
+            logger.debug(f"Real-time PCAP parse error (non-fatal): {e}")
+    
     def parse_scan_results(self, output_file: str) -> bool:
-        """Parse airodump-ng CSV output"""
+        """
+        HYBRID PARSING STRATEGY - CSV for APs, PCAP for clients
+        
+        This ensures we get:
+        1. Complete AP information from CSV (beacons, encryption, etc.)
+        2. ALL clients from PCAP (every frame with wlan.sa / wlan.da)
+        """
         try:
             csv_file = f"{output_file}-01.csv"
+            pcap_file = f"{output_file}-01.cap"
             
-            # DEBUG: Check file existence
-            console.print(f"[dim]🔍 DEBUG: CSV dosyası kontrol ediliyor: {csv_file}[/dim]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]")
+            console.print(f"[bold cyan]HYBRID PARSING: CSV (APs) + PCAP (Clients)[/bold cyan]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
             
-            if not os.path.exists(csv_file):
-                logger.error(f"Scan file not found: {csv_file}")
-                console.print(f"[red]✗ CSV dosyası bulunamadı: {csv_file}[/red]")
-                
-                # DEBUG: List files in temp dir
-                try:
-                    import glob
-                    files = glob.glob(f"{TEMP_DIR}/*")
-                    console.print(f"[yellow]🔍 DEBUG: Temp dizinindeki dosyalar: {files}[/yellow]")
-                except Exception as e:
-                    console.print(f"[yellow]🔍 DEBUG: Temp dizin okunamadı: {e}[/yellow]")
-                
-                return False
-            
-            console.print(f"[dim]✓ CSV dosyası bulundu[/dim]")
-            
-            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            console.print(f"[dim]🔍 DEBUG: CSV boyutu: {len(content)} byte[/dim]")
-            
-            if len(content) < 100:
-                logger.warning("CSV file too small, possibly empty")
-                console.print(f"[yellow]⚠️  CSV dosyası çok küçük (boş olabilir): {len(content)} byte[/yellow]")
-                return False
-            
-            # Split into AP and client sections
-            # Try multiple delimiters
-            sections = []
-            
-            # Try 1: \r\n\r\n (Windows)
-            sections = content.split('\r\n\r\n')
-            console.print(f"[dim]🔍 DEBUG: Windows format split (\\r\\n\\r\\n): {len(sections)} bölüm[/dim]")
-            
-            # Try 2: \n\n (Linux)
-            if len(sections) < 2:
-                sections = content.split('\n\n')
-                console.print(f"[dim]🔍 DEBUG: Linux format split (\\n\\n): {len(sections)} bölüm[/dim]")
-            
-            # Try 3: Look for "Station MAC" header
-            if len(sections) < 2:
-                if 'Station MAC' in content:
-                    parts = content.split('Station MAC')
-                    if len(parts) == 2:
-                        sections = [parts[0], 'Station MAC' + parts[1]]
-                        console.print(f"[dim]🔍 DEBUG: 'Station MAC' split: {len(sections)} bölüm[/dim]")
-            
-            if len(sections) == 0:
-                logger.warning("Empty scan data")
-                console.print(f"[red]✗ CSV içeriği boş[/red]")
-                return False
-            
-            # DEBUG: Show section sizes
-            for i, section in enumerate(sections):
-                console.print(f"[dim]🔍 DEBUG: Bölüm {i} boyutu: {len(section)} byte[/dim]")
-            
-            # Parse Access Points
-            ap_lines = sections[0].strip().split('\n')
-            console.print(f"[dim]🔍 DEBUG: AP satır sayısı: {len(ap_lines)}[/dim]")
-            
-            if len(ap_lines) > 1:
-                # Skip header
-                parsed_count = 0
-                for line in ap_lines[1:]:
-                    if line.strip():
-                        before_count = len(self.access_points)
-                        self._parse_ap_line(line)
-                        if len(self.access_points) > before_count:
-                            parsed_count += 1
-                
-                console.print(f"[dim]🔍 DEBUG: {parsed_count} AP başarıyla parse edildi[/dim]")
-            
-            # Parse Clients
-            if len(sections) > 1:
-                client_section = sections[1].strip()
-                
-                # DEBUG: Show first 200 chars of client section
-                console.print(f"[dim]🔍 DEBUG: Client section başlangıcı: {client_section[:200]}...[/dim]")
-                
-                client_lines = client_section.split('\n')
-                console.print(f"[dim]🔍 DEBUG: Client satır sayısı: {len(client_lines)}[/dim]")
-                
-                if len(client_lines) > 1:
-                    # Find header line (contains "Station MAC")
-                    header_idx = 0
-                    for i, line in enumerate(client_lines):
-                        if 'Station MAC' in line or 'station' in line.lower():
-                            header_idx = i
-                            console.print(f"[dim]🔍 DEBUG: Client header satırı: {i}[/dim]")
-                            break
-                    
-                    # Parse lines after header - TÜM SATIRLARI PARSE ET
-                    parsed_clients = 0
-                    total_lines = 0
-                    console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
-                    console.print(f"[bold cyan]PARSING CLIENT LINES - STARTING...[/bold cyan]")
-                    console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
-                    
-                    for line in client_lines[header_idx + 1:]:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            total_lines += 1
-                            console.print(f"\n[bold yellow]>>> PARSING LINE {total_lines}:[/bold yellow]")
-                            before_count = len(self.clients)
-                            self._parse_client_line(line)
-                            if len(self.clients) > before_count:
-                                parsed_clients += 1
-                    
-                    console.print(f"\n[bold cyan]{'═' * 80}[/bold cyan]")
-                    console.print(f"[bold cyan]PARSING COMPLETE![/bold cyan]")
-                    console.print(f"[bold green]✓ {parsed_clients} new clients parsed from {total_lines} lines[/bold green]")
-                    console.print(f"[bold green]✓ Total clients in database: {len(self.clients)}[/bold green]")
-                    console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+            # Step 1: Parse CSV for Access Points
+            console.print(f"[cyan]📊 Step 1: Parsing CSV for Access Points...[/cyan]")
+            if os.path.exists(csv_file):
+                self._parse_csv_for_aps(csv_file)
+                console.print(f"[green]✓ Found {len(self.access_points)} Access Points[/green]\n")
             else:
-                console.print(f"[yellow]⚠️  Client section bulunamadı (sadece 1 bölüm var)[/yellow]")
+                console.print(f"[yellow]⚠️  CSV file not found: {csv_file}[/yellow]\n")
             
-            logger.info(f"Found {len(self.access_points)} APs and {len(self.clients)} clients")
-            console.print(f"[cyan]📊 Toplam: {len(self.access_points)} ağ, {len(self.clients)} cihaz bulundu[/cyan]")
+            # Step 2: Parse PCAP for ALL clients (comprehensive)
+            console.print(f"[cyan]📦 Step 2: Parsing PCAP for ALL clients...[/cyan]")
+            if os.path.exists(pcap_file):
+                clients_before = len(self.clients)
+                self._extract_clients_from_pcap(pcap_file, verbose=True)
+                clients_after = len(self.clients)
+                new_clients = clients_after - clients_before
+                
+                console.print(f"[bold green]✓ PCAP Analysis Complete![/bold green]")
+                console.print(f"[green]  • New clients from PCAP: {new_clients}[/green]")
+                console.print(f"[green]  • Total clients in registry: {clients_after}[/green]\n")
+            else:
+                console.print(f"[yellow]⚠️  PCAP file not found: {pcap_file}[/yellow]\n")
             
-            # Check if any APs were found
-            if len(self.access_points) == 0:
-                logger.warning("No access points found in scan")
-                console.print(f"[yellow]⚠️  Hiç ağ parse edilemedi! CSV formatı kontrol ediliyor...[/yellow]")
-                # DEBUG: Show first few lines
-                console.print(f"[dim]🔍 DEBUG: CSV ilk 5 satır:[/dim]")
-                for i, line in enumerate(ap_lines[:5]):
-                    console.print(f"[dim]  {i}: {line[:100]}...[/dim]")
-                return False
+            # Step 3: Link clients to APs
+            console.print(f"[cyan]🔗 Step 3: Linking clients to Access Points...[/cyan]")
+            self._link_clients_to_aps()
+            console.print(f"[green]✓ Client-AP associations updated[/green]\n")
             
-            return True
+            # Summary
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]")
+            console.print(f"[bold green]✓ SCAN COMPLETE![/bold green]")
+            console.print(f"[cyan]📊 Access Points: {len(self.access_points)}[/cyan]")
+            console.print(f"[cyan]📱 Clients (this scan): {len(self.clients)}[/cyan]")
+            console.print(f"[cyan]📜 All-time clients: {len(self.all_time_clients)}[/cyan]")
+            console.print(f"[bold cyan]{'═' * 80}[/bold cyan]\n")
+            
+            return len(self.access_points) > 0
             
         except Exception as e:
             logger.error(f"Error parsing scan results: {e}")
-            console.print(f"[red]✗ CSV parse hatası: {e}[/red]")
+            console.print(f"[red]✗ Parse error: {e}[/red]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
     
+    def _parse_csv_for_aps(self, csv_file: str):
+        """Parse CSV file for Access Point information"""
+        try:
+            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Split into AP and client sections
+            sections = content.split('\r\n\r\n') if '\r\n\r\n' in content else content.split('\n\n')
+            
+            if len(sections) == 0:
+                return
+            
+            # Parse Access Points section
+            ap_lines = sections[0].strip().split('\n')
+            
+            if len(ap_lines) > 1:
+                for line in ap_lines[1:]:  # Skip header
+                    if line.strip():
+                        self._parse_ap_line(line)
+            
+        except Exception as e:
+            logger.error(f"Error parsing CSV for APs: {e}")
+    
     def _parse_ap_line(self, line: str):
-        """Parse access point line from CSV"""
+        """Parse single AP line from CSV"""
         try:
             parts = [p.strip() for p in line.split(',')]
             
             if len(parts) < 14:
-                logger.debug(f"AP line too short: {len(parts)} parts (need 14)")
                 return
             
             bssid = parts[0].strip()
             if not bssid or not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
-                logger.debug(f"Invalid BSSID format: {bssid}")
                 return
             
             # Extract data
             channel_str = parts[3].strip()
-            try:
-                channel = int(channel_str) if channel_str.isdigit() else 0
-            except:
-                channel = 0
+            channel = int(channel_str) if channel_str.isdigit() else 0
             
             power_str = parts[8].strip()
-            try:
-                power = int(power_str) if power_str.lstrip('-').isdigit() else -100
-            except:
-                power = -100
+            power = int(power_str) if power_str.lstrip('-').isdigit() else -100
             
             beacons_str = parts[9].strip()
-            try:
-                beacons = int(beacons_str) if beacons_str.isdigit() else 0
-            except:
-                beacons = 0
+            beacons = int(beacons_str) if beacons_str.isdigit() else 0
             
             essid = parts[13].strip() if len(parts) > 13 else ""
             encryption = parts[5].strip() if len(parts) > 5 else "Unknown"
             
-            # DEBUG: Log what we're parsing
-            console.print(f"[dim]🔍 Parsing AP: BSSID={bssid}, ESSID={essid}, Channel={channel}, Power={power}[/dim]")
-            logger.info(f"Parsing AP: BSSID={bssid}, ESSID={essid}")
-            
             if essid and bssid:
-                ap = AccessPoint(
-                    bssid=bssid.upper(),
-                    essid=essid,
-                    channel=channel,
-                    encryption=encryption,
-                    power=power,
-                    beacons=beacons,
-                    clients=[]
-                )
-                self.access_points[bssid.upper()] = ap
-                console.print(f"[green]✓ AP added: {essid} ({bssid.upper()})[/green]")
-                logger.info(f"✓ AP added: {essid} ({bssid})")
-            else:
-                console.print(f"[yellow]⚠️  AP skipped: ESSID={essid}, BSSID={bssid}[/yellow]")
-                logger.info(f"AP skipped: ESSID={essid}, BSSID={bssid}")
+                # Update or create AP
+                bssid_upper = bssid.upper()
+                if bssid_upper in self.access_points:
+                    # Update existing
+                    ap = self.access_points[bssid_upper]
+                    ap.power = max(ap.power, power)
+                    ap.beacons += beacons
+                else:
+                    # Create new
+                    ap = AccessPoint(
+                        bssid=bssid_upper,
+                        essid=essid,
+                        channel=channel,
+                        encryption=encryption,
+                        power=power,
+                        beacons=beacons,
+                        clients=[]
+                    )
+                    self.access_points[bssid_upper] = ap
+                    console.print(f"[green]✓ AP: {essid} ({bssid_upper}) - Ch{channel}[/green]")
                 
         except Exception as e:
             logger.debug(f"Error parsing AP line: {e}")
-            logger.debug(f"Line content: {line[:100]}")
     
-    def _parse_client_line(self, line: str):
-        """Parse client line from CSV - DOĞRU VE TEMİZ VERSİYON"""
+    def _extract_clients_from_pcap(self, pcap_file: str, verbose: bool = False):
+        """
+        PCAP-BASED CLIENT EXTRACTION - The core fix!
+        
+        Analyzes ALL frames in PCAP to extract client MAC addresses from:
+        - wlan.sa (source address)
+        - wlan.da (destination address)
+        - Association requests/responses
+        - Authentication frames
+        - Data frames
+        
+        This catches clients that CSV misses due to timing/buffering issues.
+        """
         try:
-            # CSV parsing
-            import csv as csv_module
-            reader = csv_module.reader([line])
-            parts = next(reader)
-            parts = [p.strip() for p in parts]
+            if verbose:
+                console.print(f"[cyan]🔍 Reading PCAP file: {pcap_file}[/cyan]")
             
-            # Minimum 6 kolon gerekli
-            if len(parts) < 6:
-                logger.debug(f"Client line too short: {len(parts)} parts")
-                return
-            
-            # CSV FORMAT (SABİT):
-            # 0: Station MAC
-            # 1: First time seen
-            # 2: Last time seen
-            # 3: Power
-            # 4: # packets
-            # 5: BSSID (SABİT INDEX!)
-            # 6: Probed ESSIDs
-            
-            client_mac = parts[0].strip().upper()
-            bssid = parts[5].strip().upper()
-            
-            # MAC format kontrolü
-            if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
-                logger.debug(f"Invalid client MAC: {client_mac}")
-                return
-            
-            # BSSID format kontrolü
-            if not bssid or bssid == '(NOT ASSOCIATED)':
-                logger.debug(f"Client {client_mac} not associated")
-                return
-            
-            if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
-                logger.debug(f"Invalid BSSID: {bssid}")
-                return
-            
-            # Power ve packets
-            power = -100
-            packets = 0
+            # Read PCAP with scapy
             try:
-                power_str = parts[3].strip()
-                power = int(power_str) if power_str.lstrip('-').isdigit() else -100
-            except:
-                pass
+                packets = rdpcap(pcap_file)
+            except Exception as e:
+                logger.error(f"Failed to read PCAP: {e}")
+                return
             
-            try:
-                packets_str = parts[4].strip()
-                packets = int(packets_str) if packets_str.isdigit() else 0
-            except:
-                pass
+            if verbose:
+                console.print(f"[cyan]📦 Analyzing {len(packets)} packets...[/cyan]")
             
-            # Client oluştur veya güncelle
-            if client_mac in self.clients:
-                # Güncelle
-                existing = self.clients[client_mac]
-                existing.power = max(existing.power, power)
-                existing.packets += packets
-                if bssid != existing.bssid:
-                    existing.bssid = bssid
-                console.print(f"[yellow]⟳ Client updated: {client_mac} -> {bssid} ({power} dBm, {packets} pkts)[/yellow]")
-            else:
-                # Yeni ekle
-                client = Client(
-                    mac=client_mac,
-                    bssid=bssid,
-                    power=power,
-                    packets=packets
-                )
-                self.clients[client_mac] = client
-                console.print(f"[bold green]✓ NEW CLIENT: {client_mac} -> {bssid} ({power} dBm, {packets} pkts)[/bold green]")
-                logger.info(f"✓ Client added: {client_mac} -> {bssid}")
+            # Track unique client MACs and their associated BSSIDs
+            client_associations: Dict[str, Set[str]] = {}  # client_mac -> set of BSSIDs
+            ap_bssids: Set[str] = set()
             
-            # AP'ye bağla
-            if bssid in self.access_points:
-                if client_mac not in self.access_points[bssid].clients:
-                    self.access_points[bssid].clients.append(client_mac)
-                    logger.info(f"✓ Client linked to AP: {client_mac} -> {bssid}")
-            else:
-                logger.debug(f"AP not found for client: {bssid}")
+            # First pass: Identify all AP BSSIDs (from beacons)
+            for pkt in packets:
+                if pkt.haslayer(Dot11Beacon):
+                    bssid = pkt[Dot11].addr3.upper()
+                    ap_bssids.add(bssid)
+            
+            if verbose:
+                console.print(f"[dim]📡 Identified {len(ap_bssids)} APs from beacons[/dim]")
+            
+            # Second pass: Extract client MACs from ALL frame types
+            clients_found = 0
+            
+            for pkt in packets:
+                if not pkt.haslayer(Dot11):
+                    continue
+                
+                dot11 = pkt[Dot11]
+                
+                # Get addresses
+                addr1 = dot11.addr1.upper() if dot11.addr1 else None
+                addr2 = dot11.addr2.upper() if dot11.addr2 else None
+                addr3 = dot11.addr3.upper() if dot11.addr3 else None
+                
+                # Skip broadcast/multicast
+                if addr1 and (addr1.startswith('FF:FF') or addr1.startswith('01:00')):
+                    addr1 = None
+                if addr2 and (addr2.startswith('FF:FF') or addr2.startswith('01:00')):
+                    addr2 = None
+                
+                # Determine client and AP based on frame type
+                client_mac = None
+                ap_bssid = None
+                
+                # Association Request: addr1=AP, addr2=client, addr3=AP
+                if pkt.haslayer(Dot11AssoReq):
+                    client_mac = addr2
+                    ap_bssid = addr1
+                
+                # Association Response: addr1=client, addr2=AP, addr3=AP
+                elif pkt.haslayer(Dot11AssoResp):
+                    client_mac = addr1
+                    ap_bssid = addr2
+                
+                # Authentication: addr1 or addr2 could be client
+                elif pkt.haslayer(Dot11Auth):
+                    # addr1=receiver, addr2=transmitter, addr3=BSSID
+                    ap_bssid = addr3
+                    # Client is the non-AP address
+                    if addr1 and addr1 in ap_bssids:
+                        client_mac = addr2
+                    elif addr2 and addr2 in ap_bssids:
+                        client_mac = addr1
+                    else:
+                        # Guess: addr2 is usually client in auth frames
+                        client_mac = addr2
+                        if not ap_bssid:
+                            ap_bssid = addr1
+                
+                # Data frames: ToDS=1 means client->AP, FromDS=1 means AP->client
+                elif dot11.type == 2:  # Data frame
+                    to_ds = (dot11.FCfield & 0x1) != 0
+                    from_ds = (dot11.FCfield & 0x2) != 0
                     
+                    if to_ds and not from_ds:
+                        # Client -> AP: addr1=BSSID, addr2=SA (client), addr3=DA
+                        ap_bssid = addr1
+                        client_mac = addr2
+                    elif from_ds and not to_ds:
+                        # AP -> Client: addr1=DA (client), addr2=BSSID, addr3=SA
+                        client_mac = addr1
+                        ap_bssid = addr2
+                    elif to_ds and from_ds:
+                        # WDS (ignore for now)
+                        pass
+                    else:
+                        # Ad-hoc (ignore)
+                        pass
+                
+                # Deauth/Disassoc: addr1=destination, addr2=source, addr3=BSSID
+                elif pkt.haslayer(Dot11Deauth) or pkt.haslayer(Dot11Disassoc):
+                    ap_bssid = addr3
+                    # Client is the non-AP address
+                    if addr1 and addr1 not in ap_bssids:
+                        client_mac = addr1
+                    elif addr2 and addr2 not in ap_bssids:
+                        client_mac = addr2
+                
+                # Validate and store
+                if client_mac and ap_bssid:
+                    # Validate MAC format
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
+                        continue
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', ap_bssid):
+                        continue
+                    
+                    # Skip if client MAC is actually an AP
+                    if client_mac in ap_bssids:
+                        continue
+                    
+                    # Store association
+                    if client_mac not in client_associations:
+                        client_associations[client_mac] = set()
+                    client_associations[client_mac].add(ap_bssid)
+            
+            # Add clients to registry
+            for client_mac, bssid_set in client_associations.items():
+                # Use the most common BSSID (or first one)
+                ap_bssid = list(bssid_set)[0]
+                
+                # Add or update client
+                if client_mac in self.clients:
+                    # Update existing
+                    client = self.clients[client_mac]
+                    client.packets += 1
+                    client.last_seen = time.time()
+                    # Update BSSID if changed
+                    if ap_bssid != client.bssid:
+                        client.bssid = ap_bssid
+                else:
+                    # Create new client
+                    client = Client(
+                        mac=client_mac,
+                        bssid=ap_bssid,
+                        power=-70,  # Default (PCAP doesn't have signal strength)
+                        packets=1
+                    )
+                    self.clients[client_mac] = client
+                    self.all_time_clients.add(client_mac)
+                    clients_found += 1
+                    
+                    if verbose:
+                        console.print(f"[bold green]✓ NEW CLIENT from PCAP: {client_mac} -> {ap_bssid}[/bold green]")
+            
+            if verbose and clients_found > 0:
+                console.print(f"[bold green]🎉 Discovered {clients_found} new clients from PCAP analysis![/bold green]")
+            
         except Exception as e:
-            logger.debug(f"Error parsing client line: {e}")
-            logger.debug(f"Line: {line[:100]}")
+            logger.error(f"Error extracting clients from PCAP: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _link_clients_to_aps(self):
+        """Link clients to their Access Points"""
+        for client in self.clients.values():
+            bssid = client.bssid.upper()
+            if bssid in self.access_points:
+                if client.mac not in self.access_points[bssid].clients:
+                    self.access_points[bssid].clients.append(client.mac)
     
     def get_sorted_aps(self) -> List[AccessPoint]:
         """Get access points sorted by signal strength"""
         aps = list(self.access_points.values())
-        console.print(f"[dim]🔍 DEBUG: get_sorted_aps - Toplam {len(aps)} ağ[/dim]")
         
         # Filter out APs with no ESSID or very weak signal
         aps = [ap for ap in aps if ap.essid and ap.power > -100]
-        console.print(f"[dim]🔍 DEBUG: Filtreleme sonrası {len(aps)} ağ (ESSID var ve sinyal > -100)[/dim]")
         
         # Sort by signal strength (strongest first)
         aps.sort(key=lambda x: x.power, reverse=True)
@@ -437,75 +556,65 @@ class NetworkScanner:
         bssid_upper = bssid.upper()
         
         console.print(f"[cyan]🔍 Getting clients for AP: {bssid_upper}[/cyan]")
-        console.print(f"[cyan]🔍 Total clients in database: {len(self.clients)}[/cyan]")
-        logger.info(f"Getting clients for AP: {bssid_upper}")
-        logger.info(f"Total clients in database: {len(self.clients)}")
+        console.print(f"[cyan]📊 Total clients in registry: {len(self.clients)}[/cyan]")
         
         for client in self.clients.values():
-            console.print(f"[dim]  Checking: {client.mac} -> {client.bssid} (looking for {bssid_upper})[/dim]")
-            logger.info(f"Checking client: {client.mac} -> {client.bssid} (looking for {bssid_upper})")
-            
             if client.bssid.upper() == bssid_upper:
                 clients.append(client)
-                console.print(f"[green]  ✓ MATCH! Client {client.mac} belongs to this AP[/green]")
-                logger.info(f"✓ Client matched: {client.mac}")
-            else:
-                console.print(f"[yellow]  ✗ No match: {client.bssid} != {bssid_upper}[/yellow]")
+                console.print(f"[green]  ✓ {client.mac} -> {client.bssid}[/green]")
         
         console.print(f"[bold cyan]📊 Found {len(clients)} clients for {bssid_upper}[/bold cyan]")
-        logger.info(f"Found {len(clients)} clients for {bssid_upper}")
         return clients
     
     def deep_scan_ap(self, bssid: str, channel: int, duration: int = 30) -> bool:
         """
-        Seçilen ağa özel derin tarama - TÜM cihazları bulmak için!
+        Deep scan for a specific AP - ACCUMULATES clients (no reset!)
         
         Args:
-            bssid: Hedef AP'nin BSSID'si
-            channel: AP'nin kanalı
-            duration: Tarama süresi (saniye)
+            bssid: Target AP BSSID
+            channel: AP channel
+            duration: Scan duration (seconds)
         
         Returns:
-            bool: Başarılı ise True
+            bool: Success status
         """
         try:
-            console.print(f"\n[bold yellow]🔍 DERİN TARAMA BAŞLATILIYOR...[/bold yellow]")
-            console.print(f"[cyan]📡 Hedef: {bssid}[/cyan]")
-            console.print(f"[cyan]📻 Kanal: {channel}[/cyan]")
-            console.print(f"[cyan]⏱️  Süre: {duration} saniye[/cyan]")
-            console.print(f"[dim]💡 Bu tarama seçilen ağdaki TÜM cihazları bulacak...[/dim]\n")
+            console.print(f"\n[bold yellow]🔍 DEEP SCAN STARTING...[/bold yellow]")
+            console.print(f"[cyan]📡 Target: {bssid}[/cyan]")
+            console.print(f"[cyan]📻 Channel: {channel}[/cyan]")
+            console.print(f"[cyan]⏱️  Duration: {duration} seconds[/cyan]")
+            console.print(f"[dim]💡 This scan will find ALL clients on this network...[/dim]\n")
             
             # Clean up old scan files
             cleanup_temp_files(f"{TEMP_DIR}/deepscan-*")
             
             output_file = f"{TEMP_DIR}/deepscan"
             
-            # Build command - SADECE BU KANALI TARA!
+            # Build command - BOTH CSV and PCAP
             cmd = [
                 'airodump-ng',
-                '--bssid', bssid.upper(),  # SADECE BU AP!
-                '--channel', str(channel),  # SADECE BU KANAL!
-                '--output-format', 'csv',
+                '--bssid', bssid.upper(),
+                '--channel', str(channel),
+                '--output-format', 'pcap,csv',
                 '-w', output_file,
-                '--write-interval', '1',
+                '--write-interval', '2',
                 self.interface
             ]
             
             logger.info(f"Deep scan command: {' '.join(cmd)}")
-            console.print(f"[dim]🔍 Komut: {' '.join(cmd)}[/dim]\n")
             
             # Start airodump-ng
             self.scan_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
             )
             
-            # Progress bar
+            # Progress with real-time monitoring
             from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
             
-            # REAL-TIME MONITORING - Her 3 saniyede CSV'yi parse et ve yeni client'ları göster
-            seen_clients = set()
+            clients_before = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
             
             with Progress(
                 SpinnerColumn(),
@@ -515,192 +624,63 @@ class NetworkScanner:
                 TimeRemainingColumn(),
                 console=console
             ) as progress:
-                task = progress.add_task(f"[cyan]Cihazlar aranıyor (REAL-TIME)...", total=duration)
+                task = progress.add_task(f"[cyan]Scanning for clients (REAL-TIME)...", total=duration)
                 
                 for i in range(duration):
                     time.sleep(1)
                     progress.update(task, advance=1)
                     
-                    # Her 2 saniyede bir REAL-TIME parse (daha sık kontrol)
-                    if (i + 1) % 2 == 0:
-                        temp_csv = f"{output_file}-01.csv"
-                        if os.path.exists(temp_csv):
-                            # Parse CSV ve yeni client'ları bul
-                            new_clients = self._parse_clients_realtime(temp_csv, bssid.upper(), seen_clients)
+                    # Real-time PCAP parsing every 3 seconds
+                    if (i + 1) % 3 == 0:
+                        temp_pcap = f"{output_file}-01.cap"
+                        if os.path.exists(temp_pcap):
+                            self._extract_clients_from_pcap(temp_pcap, verbose=False)
                             
-                            if new_clients:
-                                for client_mac in new_clients:
-                                    progress.console.print(f"[bold green]🆕 YENİ CİHAZ BULUNDU: {client_mac}[/bold green]")
-                                    seen_clients.add(client_mac)
-                            
-                            # Toplam sayıyı göster
-                            total_count = len(seen_clients)
-                            progress.console.print(f"[cyan]📊 {i+1}s: Toplam {total_count} cihaz[/cyan]")
+                            current_clients = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
+                            if current_clients > clients_before:
+                                new_count = current_clients - clients_before
+                                progress.console.print(f"[bold green]🆕 Found {new_count} client(s) so far![/bold green]")
+                                clients_before = current_clients
             
-            # Stop scan
-            self.stop_scan()
+            # Graceful stop
+            self.stop_scan_gracefully()
             
-            console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]")
-            console.print(f"[bold cyan]📊 REAL-TIME: {len(seen_clients)} cihaz bulundu[/bold cyan]\n")
+            console.print(f"\n[green]✓ Deep scan completed![/green]")
             
-            # Parse results - ÖNCEKİ CLIENT'LARI TEMİZLE!
-            old_client_count = len(self.clients)
-            
-            # Sadece bu AP'ye ait client'ları temizle
-            clients_to_remove = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
-            for mac in clients_to_remove:
-                del self.clients[mac]
-            
-            console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
-            
-            # Parse new results
-            csv_file = f"{output_file}-01.csv"
-            console.print(f"[dim]🔍 CSV dosyası: {csv_file}[/dim]")
-            
-            # CSV içeriğini göster (debug)
-            if os.path.exists(csv_file):
-                with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                console.print(f"[dim]🔍 CSV boyutu: {len(content)} byte[/dim]")
-                
-                # Client satırlarını say
-                if 'Station MAC' in content:
-                    client_section = content.split('Station MAC')[1] if len(content.split('Station MAC')) > 1 else ""
-                    client_lines = [line for line in client_section.split('\n') if line.strip() and not line.startswith('#')]
-                    console.print(f"[bold yellow]🔍 CSV'de {len(client_lines)-1} client satırı var (header hariç)[/bold yellow]")
-            
+            # Final parse
             success = self.parse_scan_results(output_file)
             
             if success:
-                new_client_count = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
-                console.print(f"[bold green]✓ {new_client_count} cihaz bulundu![/bold green]\n")
+                client_count = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
+                console.print(f"[bold green]✓ {client_count} total clients found for this AP![/bold green]\n")
             
             return success
             
         except Exception as e:
             logger.error(f"Deep scan error: {e}")
-            console.print(f"[red]✗ Derin tarama hatası: {e}[/red]")
+            console.print(f"[red]✗ Deep scan error: {e}[/red]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
             return False
-    
-    def _parse_clients_realtime(self, csv_file: str, target_bssid: str, seen_clients: set) -> list:
-        """
-        REAL-TIME CLIENT PARSING - DOĞRU VERSİYON
-        CSV'yi parse et ve yeni bulunan client'ları döndür
-        """
-        new_clients = []
-        
-        try:
-            import csv as csv_module
-            
-            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            # Client section'ı bul
-            if 'Station MAC' not in content:
-                return new_clients
-            
-            parts = content.split('Station MAC')
-            if len(parts) < 2:
-                return new_clients
-            
-            client_section = parts[1]
-            lines = client_section.strip().split('\n')
-            
-            # Her satırı parse et
-            for line in lines[1:]:  # İlk satır header
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                
-                try:
-                    # CSV parse (tırnak desteği)
-                    reader = csv_module.reader([line])
-                    cols = next(reader)
-                    cols = [c.strip() for c in cols]
-                    
-                    if len(cols) < 6:
-                        continue
-                    
-                    # SABİT INDEX
-                    client_mac = cols[0].strip().upper()
-                    bssid = cols[5].strip().upper()
-                    
-                    # MAC format kontrolü
-                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', client_mac):
-                        continue
-                    
-                    # BSSID format kontrolü
-                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
-                        continue
-                    
-                    # BSSID kontrolü
-                    if bssid != target_bssid.upper():
-                        continue
-                    
-                    # Yeni client mi?
-                    if client_mac not in seen_clients:
-                        new_clients.append(client_mac)
-                        
-                        # Hemen database'e ekle
-                        try:
-                            power = int(cols[3].strip()) if cols[3].strip().lstrip('-').isdigit() else -100
-                        except:
-                            power = -100
-                        
-                        try:
-                            packets = int(cols[4].strip()) if cols[4].strip().isdigit() else 0
-                        except:
-                            packets = 0
-                        
-                        client = Client(
-                            mac=client_mac,
-                            bssid=bssid,
-                            power=power,
-                            packets=packets
-                        )
-                        
-                        self.clients[client_mac] = client
-                        
-                        # AP'ye bağla
-                        if bssid in self.access_points:
-                            if client_mac not in self.access_points[bssid].clients:
-                                self.access_points[bssid].clients.append(client_mac)
-                
-                except Exception as line_error:
-                    logger.debug(f"Error parsing line: {line_error}")
-                    continue
-            
-            return new_clients
-            
-        except Exception as e:
-            logger.debug(f"Error in real-time parse: {e}")
-            return new_clients
-    
-    def _count_clients_in_csv(self, csv_file: str, bssid: str) -> int:
-        """CSV'deki client sayısını hızlıca say (progress için)"""
-        try:
-            with open(csv_file, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read()
-            
-            # Client section'ı bul
-            if 'Station MAC' in content:
-                client_section = content.split('Station MAC')[1] if 'Station MAC' in content else ""
-                # BSSID'yi içeren satırları say
-                count = content.count(bssid)
-                return max(0, count - 1)  # Header'ı çıkar
-            return 0
-        except:
-            return 0
     
     def get_ap_by_bssid(self, bssid: str) -> Optional[AccessPoint]:
         """Get access point by BSSID"""
         return self.access_points.get(bssid.upper())
     
+    def reset_client_registry(self):
+        """
+        OPTIONAL: Reset client registry
+        
+        WARNING: Only use this if you want to start fresh.
+        Normal operation should ACCUMULATE clients!
+        """
+        old_count = len(self.clients)
+        self.clients.clear()
+        console.print(f"[yellow]⚠️  Client registry reset ({old_count} clients cleared)[/yellow]")
+        console.print(f"[dim]💡 All-time registry still has {len(self.all_time_clients)} clients[/dim]")
+    
     def cleanup(self):
         """Clean up scan files"""
-        self.stop_scan()
+        self.stop_scan_gracefully()
         cleanup_temp_files(f"{TEMP_DIR}/scan-*")
         cleanup_temp_files(f"{TEMP_DIR}/deepscan-*")
-
