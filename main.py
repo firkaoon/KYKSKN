@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KYKSKN - Multi-Target Deauth Attack Framework
+KYKSKN - Created by Firkaoon
 Main Entry Point
 """
 

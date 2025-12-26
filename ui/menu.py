@@ -239,11 +239,15 @@ def confirm_attack(target_count: int, ap_name: str) -> bool:
 def show_help():
     """Display help information"""
     help_text = """
-[bold cyan]═══ KYKSKN KULLANIM KILAVUZU ═══[/bold cyan]
+[bold bright_cyan]╔════════════════════════════════════════╗[/bold bright_cyan]
+[bold bright_cyan]║[/bold bright_cyan]  [bold bright_yellow]✨ KYKSKN KULLANIM KILAVUZU ✨[/bold bright_yellow]  [bold bright_cyan]║[/bold bright_cyan]
+[bold bright_cyan]╚════════════════════════════════════════╝[/bold bright_cyan]
 
 [bold white]Genel Bilgi:[/bold white]
 KYKSKN, kablosuz ağlarda çoklu hedef deauthentication saldırıları gerçekleştiren
 bir güvenlik test aracıdır. Kali Linux platformunda çalışır.
+
+[bold bright_cyan]Created by Firkaoon[/bold bright_cyan]
 
 [bold white]Kullanım Adımları:[/bold white]
 1. Programı root yetkisiyle çalıştırın
