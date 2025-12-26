@@ -6,61 +6,61 @@ import pyfiglet
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
+from rich.align import Align
 from config.settings import APP_NAME, APP_VERSION, APP_DESCRIPTION
 
 console = Console()
 
 
 def show_banner():
-    """Display KYKSKN banner with enhanced visual effects"""
-    # Generate ASCII art
+    """Display KYKSKN banner with enhanced visuals"""
+    # Generate ASCII art with gradient effect
     ascii_art = pyfiglet.figlet_format(APP_NAME, font='slant')
     
-    # Create banner text
+    # Create colored text with effects
     banner_text = Text()
     
-    # ASCII art with gradient effect - basit renkler kullan
-    colors = ["bold cyan", "bold bright_cyan", "bold blue", "bold bright_blue", "bold magenta", "bold bright_magenta"]
+    # ASCII art with gradient effect (cyan to blue)
     lines = ascii_art.split('\n')
+    colors = ['cyan', 'bright_cyan', 'blue', 'bright_blue', 'cyan']
     for i, line in enumerate(lines):
         if line.strip():
-            color_index = (i // 2) % len(colors)
-            # Direkt stil string kullan (f-string veya + kullanma)
-            banner_text.append(line + '\n', style=colors[color_index])
-    
-    banner_text.append("\n", style="")
-    
-    # "Created by Firkaoon" with gradient
-    creator_text = Text()
-    creator_text.append("╔" + "═" * 48 + "╗\n", style="bright_cyan")
-    creator_text.append("║", style="bright_cyan")
-    creator_text.append(" " * 10, style="")
-    
-    creator_name = "Created by Firkaoon"
-    # Direkt stil string'leri kullan (f-string veya + kullanma)
-    gradient_styles = ["bold cyan", "bold bright_cyan", "bold blue", "bold bright_blue", 
-                      "bold magenta", "bold bright_magenta", "bold yellow", "bold bright_yellow"]
-    for idx, char in enumerate(creator_name):
-        if char == ' ':
-            creator_text.append(char, style="")
+            color = colors[i % len(colors)]
+            banner_text.append(line + '\n', style=f"bold {color}")
         else:
-            style = gradient_styles[idx % len(gradient_styles)]
-            creator_text.append(char, style=style)
+            banner_text.append('\n')
     
-    creator_text.append(" " * 10, style="")
-    creator_text.append("║\n", style="bright_cyan")
-    creator_text.append("╚" + "═" * 48 + "╝\n", style="bright_cyan")
+    # Add separator
+    banner_text.append("─" * 60 + "\n", style="dim cyan")
     
+    # Creator text with special effects
+    creator_text = Text()
+    creator_text.append("✨ ", style="bold yellow")
+    creator_text.append(APP_DESCRIPTION, style="bold bright_magenta")
+    creator_text.append(" ✨", style="bold yellow")
+    
+    # Add sparkle effect around creator name
+    banner_text.append("\n")
     banner_text.append(creator_text)
-    banner_text.append(f"\n{' ' * 15}Version {APP_VERSION} - 2025\n", style="dim white")
+    banner_text.append("\n")
     
-    # Panel oluştur - title'ı basit string yap (markdown sorun çıkarabilir)
+    # Version info with subtle styling
+    version_text = Text()
+    version_text.append("Version ", style="dim white")
+    version_text.append(APP_VERSION, style="bold cyan")
+    version_text.append(" • ", style="dim white")
+    version_text.append("2025", style="bold white")
+    
+    banner_text.append(version_text)
+    banner_text.append("\n")
+    
+    # Display in enhanced panel with gradient border
     panel = Panel(
-        banner_text,
+        Align.center(banner_text),
         border_style="bright_cyan",
         box="double",
-        padding=(2, 4),
-        title="╔═══ KYKSKN ═══╗",
+        padding=(1, 3),
+        title="[bold bright_cyan]⚡ KYKSKN ⚡[/bold bright_cyan]",
         title_align="center"
     )
     
@@ -82,7 +82,7 @@ def show_legal_warning():
     
     panel = Panel(
         warning_text,
-        title="UYARI",
+        title="[bold red]UYARI[/bold red]",
         border_style="red",
         padding=(1, 2)
     )
@@ -91,23 +91,27 @@ def show_legal_warning():
 
 
 def show_section_header(title: str, subtitle: str = ""):
-    """Display section header with enhanced visual effects"""
-    # Create decorative header
-    header_text = Text()
-    header_length = len(title) + 8
-    header_text.append("╔" + "═" * header_length + "╗\n", style="bright_cyan")
-    header_text.append("║", style="bright_cyan")
-    header_text.append(" " * 3, style="")
-    header_text.append(f"✨ {title} ✨", style="bold bright_yellow")
-    header_text.append(" " * 3, style="")
-    header_text.append("║\n", style="bright_cyan")
-    header_text.append("╚" + "═" * header_length + "╝\n", style="bright_cyan")
+    """Display section header with enhanced visuals"""
+    text = Text()
+    text.append("╔", style="bold cyan")
+    text.append("═" * (len(title) + 8), style="bold cyan")
+    text.append("╗\n", style="bold cyan")
+    text.append("║", style="bold cyan")
+    text.append("   ", style="bold cyan")
+    text.append(title, style="bold bright_cyan")
+    text.append("   ", style="bold cyan")
+    text.append("║\n", style="bold cyan")
+    text.append("╚", style="bold cyan")
+    text.append("═" * (len(title) + 8), style="bold cyan")
+    text.append("╝", style="bold cyan")
     
     if subtitle:
-        header_text.append(f"\n{subtitle}\n", style="dim white")
+        text.append("\n")
+        text.append("  ", style="dim")
+        text.append(subtitle, style="dim white italic")
     
     console.print()
-    console.print(header_text)
+    console.print(text)
     console.print()
 
 
@@ -128,10 +132,10 @@ def show_warning(message: str):
 
 def show_info(message: str):
     """Display info message with enhanced styling"""
-    console.print(f"[bold blue]ℹ️[/bold blue]  [blue]{message}[/blue]")
+    console.print(f"[bold blue]ℹ️[/bold blue]  [cyan]{message}[/cyan]")
 
 
 def show_loading(message: str):
-    """Display loading message with animated spinner"""
+    """Display loading message with spinner effect"""
     console.print(f"[bold yellow]⚙️[/bold yellow]  [yellow]{message}[/yellow]")
 
