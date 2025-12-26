@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-KYKSKN - Multi-Target Deauth Attack Framework
+KYKSKN - Advanced Wireless Security Framework
 Main Entry Point
+Created by Firkaoon
 """
 
 import sys
@@ -87,7 +88,12 @@ class KYKSKN:
         
     def check_requirements(self) -> bool:
         """Check system requirements"""
-        console.print("[cyan]═══ Sistem Kontrolleri ═══[/cyan]\n")
+        header_text = Text()
+        header_text.append("╔═══ ", style="bold bright_cyan")
+        header_text.append("Sistem Kontrolleri", style="bold white")
+        header_text.append(" ═══╗", style="bold bright_cyan")
+        console.print(header_text)
+        console.print()
         
         # Check root
         if not is_root():
@@ -398,8 +404,10 @@ class KYKSKN:
         except KeyboardInterrupt:
             console.print("\n\n[yellow]Program sonlandırılıyor...[/yellow]")
         except Exception as e:
-            logger.critical(f"Fatal error: {e}")
-            show_error(f"Kritik hata: {e}")
+            # Safe error logging - prevent substitute error
+            error_msg = str(e) if e else "Unknown error"
+            logger.critical(f"Fatal error: {error_msg}")
+            show_error(f"Kritik hata: {error_msg}")
         finally:
             # Cleanup
             if self.deauth_engine:
