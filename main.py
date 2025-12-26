@@ -146,9 +146,9 @@ class KYKSKN:
         
         self.network_scanner = NetworkScanner(self.monitor_interface)
         
-        # Start scan - 1 DAKİKA!
-        console.print(f"[yellow]⏳ 60 saniye (1 dakika) tarama başlatılıyor...[/yellow]")
-        success = self.network_scanner.start_scan(duration=60)
+        # Start scan - 30 SANİYE!
+        console.print(f"[yellow]⏳ 30 saniye tarama başlatılıyor...[/yellow]")
+        success = self.network_scanner.start_scan(duration=30)
         
         if not success:
             show_error("Ağ taraması başarısız!")
@@ -208,8 +208,8 @@ class KYKSKN:
         
         time.sleep(1)
         
-        # Derin tarama başlat - 2 DAKİKA!
-        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=120)
+        # Derin tarama başlat - 60 SANİYE!
+        deep_scan_success = self.network_scanner.deep_scan_ap(ap.bssid, ap.channel, duration=60)
         
         if not deep_scan_success:
             show_error("Derin tarama başarısız!")

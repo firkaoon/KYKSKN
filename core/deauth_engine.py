@@ -140,17 +140,11 @@ class DeauthEngine:
         logger.info(f"Attack mode controller started: {mode_type}")
         
         if mode_type == 'infinite':
-            # Sonsuz mod - hiçbir şey yapma, sürekli devam et
-            logger.info("Infinite mode: attack will run until manually stopped")
-            while self.is_attacking:
-                time.sleep(1)
-        
-        elif mode_type == 'continuous':
-            # Sürekli mod - belirli süre boyunca
-            duration = self.attack_mode.get('duration', 300)
-            logger.info(f"Continuous mode: attacking for {duration} seconds")
+            # Sonsuz mod - SALDIRI BAŞLAT VE SÜREKLI DEVAM ET!
+            logger.info("Infinite mode: starting continuous attack until manually stopped")
+            console.print(f"[red]🔴 SONSUZ MOD: Sürekli saldırı başlatılıyor...[/red]")
             
-            # Start all targets
+            # TÜM HEDEFLERE SALDIRI BAŞLAT!
             for target in self.targets.values():
                 thread = threading.Thread(
                     target=self._attack_target,
@@ -161,11 +155,37 @@ class DeauthEngine:
                 self.attack_threads.append(thread)
                 time.sleep(0.1)
             
+            console.print(f"[red]⚡ {len(self.targets)} hedefe sürekli saldırı aktif![/red]")
+            
+            # Sonsuz döngü - manuel durdurulana kadar
+            while self.is_attacking:
+                time.sleep(1)
+        
+        elif mode_type == 'continuous':
+            # Sürekli mod - belirli süre boyunca SÜREKLI SALDIRI
+            duration = self.attack_mode.get('duration', 300)
+            logger.info(f"Continuous mode: attacking for {duration} seconds")
+            console.print(f"[yellow]🟡 SÜREKLI MOD: {duration} saniye ({duration//60} dakika) sürekli saldırı![/yellow]")
+            
+            # TÜM HEDEFLERE SÜREKLI SALDIRI BAŞLAT!
+            for target in self.targets.values():
+                thread = threading.Thread(
+                    target=self._attack_target_timed,
+                    args=(target, duration),
+                    daemon=True
+                )
+                thread.start()
+                self.attack_threads.append(thread)
+                time.sleep(0.1)
+            
+            console.print(f"[yellow]⚡ {len(self.targets)} hedefe {duration}s sürekli saldırı başladı![/yellow]")
+            
             # Wait for duration
             time.sleep(duration)
             
             # Stop attack
             logger.info("Continuous mode duration reached, stopping attack")
+            console.print(f"[green]✓ Sürekli mod tamamlandı ({duration}s)[/green]")
             self.stop_attack()
         
         elif mode_type == 'periodic':

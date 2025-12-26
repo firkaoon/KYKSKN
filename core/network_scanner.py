@@ -38,7 +38,6 @@ class Client:
     mac: str
     bssid: str
     power: int
-    packets: int
     
     def __str__(self):
         return f"{self.mac} -> {self.bssid} ({self.power}dBm)"
@@ -120,7 +119,10 @@ class NetworkScanner:
             csv_file = f"{output_file}-01.csv"
             
             # DEBUG: Check file existence
-            console.print(f"[dim]🔍 DEBUG: CSV dosyası kontrol ediliyor: {csv_file}[/dim]")
+            console.print(f"[bold cyan]🔍 DEBUG: CSV PARSE BAŞLIYOR[/bold cyan]")
+            console.print(f"[cyan]📁 Output file base: {output_file}[/cyan]")
+            console.print(f"[cyan]📄 CSV dosyası: {csv_file}[/cyan]")
+            console.print(f"[dim]🔍 DEBUG: Dosya varlık kontrolü yapılıyor...[/dim]")
             
             if not os.path.exists(csv_file):
                 logger.error(f"Scan file not found: {csv_file}")
@@ -342,21 +344,14 @@ class NetworkScanner:
             except:
                 power = -100
             
-            packets_str = parts[4].strip()
-            try:
-                packets = int(packets_str) if packets_str.isdigit() else 0
-            except:
-                packets = 0
-            
             # DEBUG: Log what we're parsing
-            console.print(f"[dim]🔍 Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}, Packets={packets}[/dim]")
+            console.print(f"[dim]🔍 Parsing Client: MAC={client_mac}, BSSID={bssid}, Power={power}[/dim]")
             logger.info(f"Parsing Client: MAC={client_mac}, BSSID={bssid}")
             
             client = Client(
                 mac=client_mac.upper(),
                 bssid=bssid.upper(),
-                power=power,
-                packets=packets
+                power=power
             )
             
             self.clients[client_mac.upper()] = client
@@ -491,22 +486,30 @@ class NetworkScanner:
             
             console.print(f"\n[green]✓ Derin tarama tamamlandı![/green]\n")
             
-            # Parse results - ÖNCEKİ CLIENT'LARI TEMİZLE!
-            old_client_count = len(self.clients)
+            # KRİTİK: TÜM CLIENT'LARI TEMİZLE - Sadece derin taramadan gelenleri kullan!
+            console.print(f"[dim]🔄 Tüm client veritabanı temizleniyor...[/dim]")
+            old_count = len(self.clients)
+            self.clients.clear()  # HEPSİNİ TEMİZLE!
+            console.print(f"[dim]🔄 {old_count} eski client temizlendi[/dim]")
             
-            # Sadece bu AP'ye ait client'ları temizle
-            clients_to_remove = [mac for mac, client in self.clients.items() if client.bssid.upper() == bssid.upper()]
-            for mac in clients_to_remove:
-                del self.clients[mac]
-            
-            console.print(f"[dim]🔄 Eski client'lar temizlendi: {len(clients_to_remove)} adet[/dim]")
-            
-            # Parse new results
+            # Parse new results - SADECE DERİN TARAMADAN GELEN CLIENT'LAR
+            console.print(f"[cyan]📊 Derin tarama sonuçları parse ediliyor...[/cyan]")
             success = self.parse_scan_results(output_file)
             
             if success:
+                # Sadece bu AP'ye ait client'ları say
                 new_client_count = len([c for c in self.clients.values() if c.bssid.upper() == bssid.upper()])
-                console.print(f"[bold green]✓ {new_client_count} cihaz bulundu![/bold green]\n")
+                total_clients = len(self.clients)
+                
+                console.print(f"[bold green]✓ TOPLAM {total_clients} cihaz bulundu![/bold green]")
+                console.print(f"[bold green]✓ Bu AP'ye ait: {new_client_count} cihaz[/bold green]\n")
+                
+                # DEBUG: Tüm client'ları listele
+                console.print(f"[dim]🔍 DEBUG: Bulunan tüm client'lar:[/dim]")
+                for mac, client in self.clients.items():
+                    console.print(f"[dim]  • {mac} -> {client.bssid} ({client.power} dBm)[/dim]")
+            else:
+                console.print(f"[red]✗ Parse başarısız![/red]")
             
             return success
             

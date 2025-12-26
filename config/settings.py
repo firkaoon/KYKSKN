@@ -21,8 +21,8 @@ DEAUTH_REASON_CODE = 7  # Class 3 frame received from nonassociated STA
 DEAUTH_INTERVAL = 0.1  # seconds between packets
 
 # Scanning Settings
-SCAN_TIMEOUT = 60  # seconds - Ağ tarama süresi (1 dakika)
-DEEP_SCAN_TIMEOUT = 120  # seconds - Cihaz tarama süresi (2 dakika)
+SCAN_TIMEOUT = 30  # seconds - Ağ tarama süresi (30 saniye)
+DEEP_SCAN_TIMEOUT = 60  # seconds - Cihaz tarama süresi (60 saniye)
 CHANNEL_HOP_INTERVAL = 0.5  # seconds
 MAX_SCAN_RETRIES = 3
 
