@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-KYKSKN - Created by Firkaoon
+KYKSKN - Multi-Target Deauth Attack Framework
 Main Entry Point
 """
 
@@ -398,13 +398,8 @@ class KYKSKN:
         except KeyboardInterrupt:
             console.print("\n\n[yellow]Program sonlandırılıyor...[/yellow]")
         except Exception as e:
-            try:
-                error_msg = str(e) if e else "Bilinmeyen hata"
-                logger.critical(f"Fatal error: {error_msg}")
-                show_error(f"Kritik hata: {error_msg}")
-            except Exception:
-                logger.critical("Fatal error: Unknown exception")
-                show_error("Kritik hata: Bilinmeyen hata oluştu")
+            logger.critical(f"Fatal error: {e}")
+            show_error(f"Kritik hata: {e}")
         finally:
             # Cleanup
             if self.deauth_engine:

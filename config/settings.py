@@ -5,7 +5,7 @@ KYKSKN - Configuration Settings
 # Application Info
 APP_NAME = "KYKSKN"
 APP_VERSION = "1.0.0"
-APP_DESCRIPTION = "Created by Firkaoon"
+APP_DESCRIPTION = "Multi-Target Deauth Attack Framework"
 
 # Colors
 COLOR_PRIMARY = "cyan"
